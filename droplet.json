@@ -1,0 +1,41 @@
+{
+  "id": "gossip",
+  "name": "Gossip",
+  "version": "1.0.0",
+  "summary": "Phone notifications and battery from Gossip",
+  "description": "Shows the notifications and battery of the Android phone paired with the Gossip Mac app, announces new notifications in the notch, and replies to or dismisses them on the phone. Needs the Gossip fork with its Droppy bridge running on this Mac.",
+  "category": "Productivity",
+  "kit": {
+    "abi": 1,
+    "minAPI": "1.10.0"
+  },
+  "minAppVersion": "15.3.0",
+  "capabilities": [
+    "network-client",
+    "hud",
+    "shelf-write"
+  ],
+  "surfaces": [
+    "shelf-widget",
+    "hud"
+  ],
+  "icon": "Gossip.icon",
+  "creator": {
+    "name": "Bryan Galdámez",
+    "kind": "community",
+    "url": "https://github.com/vmd1/gossip",
+    "avatar": "Creator.png",
+    "gitlab": "josuegalre"
+  },
+  "source": {
+    "repository": "https://gitlab.com/droppyformac1/droplets/-/tree/main/droplets/gossip",
+    "license": "Apache-2.0"
+  },
+  "screenshots": [],
+  "keywords": [
+    "android",
+    "phone",
+    "notifications",
+    "battery"
+  ]
+}
