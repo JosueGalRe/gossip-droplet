@@ -23,6 +23,36 @@ struct LowBatteryLatchTests {
     }
 }
 
+struct OTPCodeTests {
+    @Test func findsCodesTheTextCallsCodes() {
+        #expect(OTPCode.find(in: "Tu código es 482913") == "482913")
+        #expect(OTPCode.find(in: "Your verification code: 123-456") == "123456")
+        #expect(OTPCode.find(in: "G-735201 is your Google verification code") == "735201")
+        #expect(OTPCode.find(in: "Clave de acceso 8841. No la compartas.") == "8841")
+    }
+
+    @Test func ignoresNumbersThatAreNotCodes() {
+        #expect(OTPCode.find(in: "Compra por $1,250.00 con tarjeta 4321") == nil)
+        #expect(OTPCode.find(in: "Pedido 12345678 en camino") == nil)
+        #expect(OTPCode.find(in: "Your code is 12") == nil)
+        #expect(OTPCode.find(in: "Shopping list: 4 items, order 99881") == nil)
+        #expect(OTPCode.find(in: "Código de descuento: total 1250.50") == nil)
+    }
+}
+
+struct LiveInfoTests {
+    @Test func fractionClampsAndNeedsAMax() {
+        let live = { (progress: Int?, max: Int?) in
+            LiveInfo(category: nil, progress: progress, progressMax: max, indeterminate: nil,
+                     chronometerBaseMs: nil, countDown: nil, promoted: nil)
+        }
+        #expect(live(30, 120).fraction == 0.25)
+        #expect(live(150, 100).fraction == 1)
+        #expect(live(5, 0).fraction == nil)
+        #expect(live(nil, nil).fraction == nil)
+    }
+}
+
 struct RelativeTimeTests {
     @Test func formatsShortUnits() {
         let now = Date(timeIntervalSince1970: 1_000_000)

@@ -16,6 +16,36 @@ struct GossipDevice: Decodable, Equatable, Identifiable {
     var isPhone: Bool { type != "mac" }
 }
 
+/// One of a notification's own buttons ("Mark as read", "Archive", "Answer"), by its index on the phone.
+struct NotificationAction: Decodable, Equatable, Hashable {
+    let index: Int
+    let title: String
+}
+
+/// The live state of an ongoing notification: a call, a timer, a delivery or a download.
+struct LiveInfo: Decodable, Equatable {
+    let category: String?
+    let progress: Int?
+    let progressMax: Int?
+    let indeterminate: Bool?
+    /// Milliseconds since 1970 the chronometer counts from (or down to).
+    let chronometerBaseMs: Int64?
+    let countDown: Bool?
+    let promoted: Bool?
+
+    var isCall: Bool { category == "call" }
+
+    /// 0...1 when the notification shows determinate progress.
+    var fraction: Double? {
+        guard let progress, let progressMax, progressMax > 0 else { return nil }
+        return min(1, max(0, Double(progress) / Double(progressMax)))
+    }
+
+    var chronometerDate: Date? {
+        chronometerBaseMs.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
+    }
+}
+
 /// A notification a phone is mirroring.
 struct PhoneNotification: Decodable, Equatable {
     let deviceId: String
@@ -29,10 +59,29 @@ struct PhoneNotification: Decodable, Equatable {
     /// Android's post time, in milliseconds since 1970.
     let timestamp: Int64
     let replay: Bool?
+    var avatarBase64: String? = nil
+    var pictureBase64: String? = nil
+    var actions: [NotificationAction]? = nil
+    var smartReplies: [String]? = nil
+    var live: LiveInfo? = nil
 
     var key: String { "\(deviceId)|\(id)" }
     var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp) / 1000) }
     var headline: String { title.isEmpty ? appName : title }
+    var otpCode: String? { OTPCode.find(in: "\(title) \(body)") }
+}
+
+/// Finds a one-time code in a notification: 4 to 8 digits, only when the text says it is a code, so an amount, a date
+/// or an order number is not offered for copying.
+enum OTPCode {
+    private static let keyword = #"\b(code|c[óo]digo|otp|verification|verificaci[óo]n|pin|clave|token|2fa|passcode|contrase[ñn]a)\b"#
+    private static let digits = #"(?<![\d.,])(\d{3}[- ]\d{3}|\d{4,8})(?![\d.,]?\d)"#
+
+    static func find(in text: String) -> String? {
+        guard text.range(of: keyword, options: [.regularExpression, .caseInsensitive]) != nil,
+              let match = text.range(of: digits, options: .regularExpression) else { return nil }
+        return String(text[match]).filter(\.isNumber)
+    }
 }
 
 /// One app's notifications, newest first, as the widget groups them.

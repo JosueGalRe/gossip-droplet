@@ -37,7 +37,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             switch self {
             case .notifications: 180
             case .messages: 280
-            case .media: 100
+            case .media: 128
             }
         }
     }
@@ -51,6 +51,8 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     @Published private(set) var nowPlaying: [String: NowPlaying] = [:]
     @Published var replyingTo: String?
     @Published var replyText = ""
+    /// The notification row opened to show its picture, buttons and suggested replies.
+    @Published var expandedKey: String?
 
     @Published private(set) var threads: [MessageThread] = []
     @Published private(set) var openThreadID: String?
@@ -61,9 +63,12 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     private var host: DropletHost?
     private var client: BridgeClient?
-    private var icons: [String: NSImage] = [:]
+    /// Decoded icons, avatars and pictures, by notification key and kind.
+    private var images: [String: [String: NSImage]] = [:]
     private var artwork: [String: NSImage] = [:]
     private var hudKey: String?
+    /// When each device's now-playing state arrived, to advance its position while it plays.
+    private var mediaReceivedAt: [String: Date] = [:]
     private var batteryLatches: [String: LowBatteryLatch] = [:]
     private var messagesViewers = 0
     private let activitySubject = CurrentValueSubject<LiveActivityState?, Never>(nil)
@@ -120,7 +125,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         ringing = []
         notifications = []
         nowPlaying = [:]
-        icons = [:]
+        images = [:]
         artwork = [:]
         replyingTo = nil
         publishActivity()
@@ -162,22 +167,39 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             publishLockScreen()
         case "notification.posted":
             guard let posted = try? decoder.decode(PhoneNotification.self, from: line) else { return }
+            let previous = notifications.first { $0.key == posted.key }
             notifications.removeAll { $0.key == posted.key }
             notifications.append(posted)
             notifications.sort { $0.timestamp > $1.timestamp }
-            icons[posted.key] = nil
+            images[posted.key] = nil
             rememberApp(package: posted.appPackage, name: posted.appName)
-            if posted.replay != true { announce(posted) }
+            publishActivity()
+            guard posted.replay != true else { return }
+            if let live = posted.live {
+                // A call rings in the notch until answered or gone; other live updates only move the live activity.
+                if live.isCall, previous == nil || previous?.live?.chronometerBaseMs != live.chronometerBaseMs { announceCall(posted) }
+            } else if previous == nil || previous?.title != posted.title || previous?.body != posted.body {
+                // An update that only adds suggestions or changes nothing visible is not news.
+                announce(posted)
+            } else if hudKey == posted.key {
+                announce(posted)
+            }
         case "notification.removed":
             guard let removed = try? decoder.decode(Removed.self, from: line) else { return }
             let key = "\(removed.deviceId)|\(removed.id)"
             notifications.removeAll { $0.key == key }
-            icons[key] = nil
+            images[key] = nil
             if replyingTo == key { replyingTo = nil }
+            if expandedKey == key { expandedKey = nil }
             if hudKey == key {
                 hudKey = nil
                 host?.hud.dismiss(id: Self.notificationHUDID)
             }
+            if callHUDKey == key {
+                callHUDKey = nil
+                host?.hud.dismiss(id: Self.callHUDID)
+            }
+            publishActivity()
         case "media":
             guard let media = try? decoder.decode(Media.self, from: line) else { return }
             if let playing = media.nowPlaying {
@@ -186,9 +208,11 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
                     artwork[media.deviceId] = NSImage(data: data)
                 }
                 nowPlaying[media.deviceId] = playing
+                mediaReceivedAt[media.deviceId] = Date()
             } else {
                 nowPlaying[media.deviceId] = nil
                 artwork[media.deviceId] = nil
+                mediaReceivedAt[media.deviceId] = nil
             }
             publishActivity()
         case "messages.threads":
@@ -243,11 +267,22 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     // MARK: Notifications
 
+    /// What the widget lists: every notification of an app the user shows, the live ones apart.
+    var visibleNotifications: [PhoneNotification] {
+        guard showsNotifications else { return [] }
+        let hidden = hiddenApps
+        return notifications.filter { !hidden.contains($0.appPackage) }
+    }
+
+    var liveNotifications: [PhoneNotification] {
+        visibleNotifications.filter { $0.live != nil }.sorted { ($0.live?.isCall == true ? 0 : 1) < ($1.live?.isCall == true ? 0 : 1) }
+    }
+
     /// Grouped by app, the app with the newest notification first.
     var notificationGroups: [NotificationGroup] {
         var order: [String] = []
         var byApp: [String: [PhoneNotification]] = [:]
-        for notification in notifications {
+        for notification in visibleNotifications where notification.live == nil {
             if byApp[notification.appPackage] == nil { order.append(notification.appPackage) }
             byApp[notification.appPackage, default: []].append(notification)
         }
@@ -288,12 +323,38 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         reveal(.notifications)
     }
 
-    func icon(for notification: PhoneNotification) -> NSImage? {
-        if let cached = icons[notification.key] { return cached }
-        guard let base64 = notification.iconBase64, let data = Data(base64Encoded: base64),
-              let image = NSImage(data: data) else { return nil }
-        icons[notification.key] = image
+    func icon(for notification: PhoneNotification) -> NSImage? { image(notification, "icon", notification.iconBase64) }
+    func avatar(for notification: PhoneNotification) -> NSImage? { image(notification, "avatar", notification.avatarBase64) }
+    func picture(for notification: PhoneNotification) -> NSImage? { image(notification, "picture", notification.pictureBase64) }
+
+    private func image(_ notification: PhoneNotification, _ kind: String, _ base64: String?) -> NSImage? {
+        if let cached = images[notification.key]?[kind] { return cached }
+        guard let base64, let data = Data(base64Encoded: base64), let image = NSImage(data: data) else { return nil }
+        images[notification.key, default: [:]][kind] = image
         return image
+    }
+
+    func perform(_ action: NotificationAction, on notification: PhoneNotification) {
+        client?.send(["type": "action", "deviceId": notification.deviceId, "id": notification.id, "index": action.index])
+        host?.feedback.play(.success)
+    }
+
+    /// Sends a suggested reply as it is.
+    func quickReply(_ text: String, to notification: PhoneNotification) {
+        client?.send(["type": "reply", "deviceId": notification.deviceId, "id": notification.id, "text": text])
+        host?.feedback.play(.success)
+        if hudKey == notification.key {
+            hudKey = nil
+            host?.hud.dismiss(id: Self.notificationHUDID)
+        }
+    }
+
+    func copyCode(_ code: String) {
+        if host?.workspace.copyToPasteboard(code) == true { host?.feedback.play(.success) }
+    }
+
+    func toggleExpanded(_ notification: PhoneNotification) {
+        expandedKey = expandedKey == notification.key ? nil : notification.key
     }
 
     // MARK: Media
@@ -309,6 +370,26 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     func media(_ action: String) {
         client?.send(["type": "media", "action": action])
+    }
+
+    /// Where playback is now: the last reported position, advanced by the time since while it plays.
+    func mediaPosition(at date: Date = Date()) -> Int {
+        guard let media = currentMedia else { return 0 }
+        var position = media.playing.positionMs
+        if media.playing.isPlaying, let received = mediaReceivedAt[media.deviceID] {
+            position += Int(date.timeIntervalSince(received) * 1000)
+        }
+        return media.playing.durationMs > 0 ? min(position, media.playing.durationMs) : position
+    }
+
+    func seek(toFraction fraction: Double) {
+        guard let media = currentMedia, media.playing.durationMs > 0 else { return }
+        let ms = Int(Double(media.playing.durationMs) * min(1, max(0, fraction)))
+        client?.send(["type": "media", "action": media.playing.isPlaying ? "play" : "pause", "seekMs": ms])
+    }
+
+    func volume(up: Bool) {
+        client?.send(["type": "volume", "direction": up ? "up" : "down"])
     }
 
     // MARK: Messages
@@ -346,6 +427,34 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     var announcesNotifications: Bool {
         host?.preferences.value(forKey: "announce", default: true) ?? true
+    }
+
+    /// Master switch: off hides the phone's notifications everywhere in the droplet.
+    var showsNotifications: Bool {
+        host?.preferences.value(forKey: "show", default: true) ?? true
+    }
+
+    var hiddenApps: Set<String> {
+        Set(host?.preferences.value(forKey: "hiddenApps", as: [String].self) ?? [])
+    }
+
+    func isHidden(_ package: String) -> Bool { hiddenApps.contains(package) }
+
+    func setHidden(_ package: String, _ hidden: Bool) {
+        var list = hiddenApps
+        if hidden { list.insert(package) } else { list.remove(package) }
+        setPreference(list.sorted(), forKey: "hiddenApps")
+    }
+
+    /// Announcements stay quiet until this moment.
+    var announcementsPausedUntil: Date? {
+        let seconds = host?.preferences.value(forKey: "pausedUntil", default: 0.0) ?? 0
+        let date = Date(timeIntervalSince1970: seconds)
+        return date > Date() ? date : nil
+    }
+
+    func pauseAnnouncements(for interval: TimeInterval?) {
+        setPreference(interval.map { Date().addingTimeInterval($0).timeIntervalSince1970 } ?? 0, forKey: "pausedUntil")
     }
 
     var hudDuration: Double {
@@ -386,18 +495,38 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     // MARK: HUD
 
     private func announce(_ notification: PhoneNotification) {
-        guard let host, announcesNotifications, !isMuted(notification.appPackage) else { return }
+        guard let host, showsNotifications, announcesNotifications, announcementsPausedUntil == nil,
+              !isMuted(notification.appPackage), !isHidden(notification.appPackage) else { return }
         hudKey = notification.key
         let presented = host.hud.present(DropletHUDRequest(
             id: Self.notificationHUDID, duration: hudDuration,
             accessibilityLabel: "\(notification.appName): \(notification.headline)",
-            isExpanded: true, expandedContentHeight: 66
+            isExpanded: true, expandedContentHeight: NotificationCard.height(for: notification)
         ) { [weak self] in
             if let self { NotificationStrip(droplet: self, notification: notification) }
         } expanded: { [weak self] in
             if let self { NotificationCard(droplet: self, notification: notification) }
         })
         if !presented { hudKey = nil }
+    }
+
+    static let callHUDID = "gossip.call"
+    private var callHUDKey: String?
+
+    /// A ringing call stays in the notch until it is answered, declined or gone; one in progress shows its duration.
+    private func announceCall(_ notification: PhoneNotification) {
+        guard let host, showsNotifications, !isHidden(notification.appPackage) else { return }
+        callHUDKey = notification.key
+        let ringing = notification.live?.chronometerDate == nil
+        host.hud.present(DropletHUDRequest(
+            id: Self.callHUDID, duration: ringing ? nil : 4, priority: .high,
+            accessibilityLabel: "Call: \(notification.headline)",
+            isExpanded: true, expandedContentHeight: 66
+        ) { [weak self] in
+            if let self { NotificationStrip(droplet: self, notification: notification) }
+        } expanded: { [weak self] in
+            if let self { CallCard(droplet: self, notification: notification) }
+        })
     }
 
     private func checkBattery() {
@@ -431,15 +560,33 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     // MARK: Live activity and lock screen
 
+    /// What the compact activity shows: a call or another live notification first, else the playing media.
+    enum ActivitySubject {
+        case live(PhoneNotification)
+        case media(deviceID: String, playing: NowPlaying)
+    }
+
+    var activityFocus: ActivitySubject? {
+        if let live = liveNotifications.first { return .live(live) }
+        if let media = currentMedia, media.playing.isPlaying { return .media(deviceID: media.deviceID, playing: media.playing) }
+        return nil
+    }
+
     private func publishActivity() {
-        guard let media = currentMedia, media.playing.isPlaying else {
+        switch activityFocus {
+        case .live(let notification):
+            activitySubject.send(LiveActivityState(
+                priority: notification.live?.isCall == true ? 300 : 200,
+                accessibilityTitle: "\(notification.appName): \(notification.headline)"
+            ))
+        case .media(_, let playing):
+            activitySubject.send(LiveActivityState(
+                priority: 100,
+                accessibilityTitle: "Phone playing \(playing.title) by \(playing.artist)"
+            ))
+        case nil:
             activitySubject.send(nil)
-            return
         }
-        activitySubject.send(LiveActivityState(
-            priority: 100,
-            accessibilityTitle: "Phone playing \(media.playing.title) by \(media.playing.artist)"
-        ))
     }
 
     private func publishLockScreen() {
@@ -472,7 +619,14 @@ extension GossipDroplet {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         droplet.notifications = [
             PhoneNotification(deviceId: "pixel", id: "1", appPackage: "com.whatsapp", appName: "WhatsApp", title: "Ana",
-                              body: "¿Llegas a las 7?", iconBase64: nil, hasReply: true, timestamp: now - 60_000, replay: nil),
+                              body: "¿Llegas a las 7?", iconBase64: nil, hasReply: true, timestamp: now - 60_000, replay: nil,
+                              actions: [NotificationAction(index: 1, title: "Mark as read")],
+                              smartReplies: ["Sí, ahí estaré", "Voy tarde", "👍"]),
+            PhoneNotification(deviceId: "pixel", id: "5", appPackage: "com.ubercab.eats", appName: "Uber Eats",
+                              title: "Tu pedido va en camino", body: "Llega en 8 min", iconBase64: nil, hasReply: false,
+                              timestamp: now - 120_000, replay: nil,
+                              live: LiveInfo(category: "progress", progress: 60, progressMax: 100, indeterminate: false,
+                                             chronometerBaseMs: nil, countDown: false, promoted: true)),
             PhoneNotification(deviceId: "pixel", id: "4", appPackage: "com.whatsapp", appName: "WhatsApp", title: "Familia",
                               body: "Mamá: ya llegamos", iconBase64: nil, hasReply: true, timestamp: now - 600_000, replay: nil),
             PhoneNotification(deviceId: "pixel", id: "2", appPackage: "com.google.android.gm", appName: "Gmail",
@@ -530,23 +684,14 @@ extension GossipDroplet: LiveActivityProviding {
 
     public func liveActivitySeatDidChange(_ seat: DropletLiveActivitySeat) {}
 
-    public func makeCompactLeading() -> AnyView {
-        AnyView(MediaArtwork(image: currentMedia.flatMap { artwork(for: $0.deviceID) },
-                             size: DroppyLiveActivityMetrics.iconSize + 5))
-    }
+    public func makeCompactLeading() -> AnyView { AnyView(ActivityLeading(droplet: self)) }
 
-    public func makeCompactTrailing() -> AnyView {
-        AnyView(
-            Image(systemName: "waveform")
-                .font(.system(size: DroppyLiveActivityMetrics.iconSize, weight: .medium))
-                .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-        )
-    }
+    public func makeCompactTrailing() -> AnyView { AnyView(ActivityTrailing(droplet: self)) }
 
     /// Droppy does not mount it: hovering the activity opens the shelf, where the media widget has the controls.
     public func makeExpanded(context: LiveActivityContext) -> AnyView {
         AnyView(
-            Text(currentMedia?.playing.title ?? "")
+            Text(activityTitle)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
                 .frame(width: context.availableWidth, height: DroppyLiveActivityMetrics.cardContentHeight)
@@ -554,6 +699,14 @@ extension GossipDroplet: LiveActivityProviding {
     }
 
     public func makeCompanionCompact(context: CompactLiveActivityContext) -> AnyView { makeCompactTrailing() }
+
+    private var activityTitle: String {
+        switch activityFocus {
+        case .live(let notification): notification.headline
+        case .media(_, let playing): playing.title
+        case nil: ""
+        }
+    }
 
     public func makeCompanionDetail(context: LiveActivityContext) -> AnyView? { nil }
 }

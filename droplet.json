@@ -16,7 +16,8 @@
     "shelf-write",
     "global-shortcuts",
     "lock-screen",
-    "menu-bar"
+    "menu-bar",
+    "clipboard-write"
   ],
   "surfaces": [
     "shelf-widget",
