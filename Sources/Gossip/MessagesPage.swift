@@ -36,25 +36,24 @@ struct MessagesPage: View {
         .onDisappear { droplet.messagesVisible(false) }
     }
 
+    /// The paired card shows the three newest conversations, one line each.
     @ViewBuilder private var compactBody: some View {
-        if let latest = droplet.threads.first {
-            VStack(alignment: .leading, spacing: DroppySpacing.xs) {
-                Text(latest.title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                Text(latest.snippet)
-                    .font(.system(size: 11))
-                    .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                    .lineLimit(2)
-                if droplet.unreadCount > 0 {
-                    Text("\(droplet.unreadCount) unread")
-                        .font(.system(size: 11))
-                        .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
+        if droplet.threads.isEmpty {
+            Message(text: droplet.messagesLoading ? "Loading conversations…" : "No conversations")
+        } else {
+            VStack(alignment: .leading, spacing: DroppySpacing.sm) {
+                ForEach(droplet.threads.prefix(3)) { thread in
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(thread.title)
+                            .font(.system(size: 12, weight: thread.unread > 0 ? .bold : .semibold))
+                            .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                        Text((thread.outgoing ? "You: " : "") + thread.snippet)
+                            .font(.system(size: 11))
+                            .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+                    }
+                    .lineLimit(1)
                 }
             }
-            .lineLimit(1)
-        } else {
-            Message(text: droplet.messagesLoading ? "Loading conversations…" : "No conversations")
         }
     }
 }

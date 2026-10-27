@@ -129,9 +129,16 @@ struct PhoneWidget: View {
 
     private var header: some View {
         HStack(spacing: DroppySpacing.xsm) {
-            Image(systemName: "iphone")
-                .font(.system(size: 12, weight: .medium))
-            if !context.isCompact {
+            if context.isCompact {
+                // Narrow: the battery is the phone's status, in the title's place, and the switch takes the rest.
+                if let battery = droplet.phone?.battery {
+                    BatteryLabel(battery: battery)
+                } else {
+                    Image(systemName: "iphone").font(.system(size: 12, weight: .medium))
+                }
+            } else {
+                Image(systemName: "iphone")
+                    .font(.system(size: 12, weight: .medium))
                 Text(droplet.phone?.name ?? "Phone")
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
@@ -142,7 +149,7 @@ struct PhoneWidget: View {
                     .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
             }
             Spacer(minLength: 0)
-            if let battery = droplet.phone?.battery {
+            if !context.isCompact, let battery = droplet.phone?.battery {
                 BatteryLabel(battery: battery)
             }
             if !context.isCompact, droplet.phone != nil {
@@ -217,29 +224,33 @@ private struct NotificationsPage: View {
         }
     }
 
-    /// The paired card spends its room on the newest notification.
+    /// The paired card spends its room on the two newest notifications.
     @ViewBuilder private var compactBody: some View {
-        if let latest = droplet.notifications.first {
-            VStack(alignment: .leading, spacing: DroppySpacing.xs) {
-                HStack(spacing: DroppySpacing.xsm) {
-                    AppIcon(image: droplet.icon(for: latest), size: 16)
-                    Text(latest.headline)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                        .lineLimit(1)
+        if droplet.notifications.isEmpty {
+            Message(text: "No notifications")
+        } else {
+            VStack(alignment: .leading, spacing: DroppySpacing.sm) {
+                ForEach(droplet.notifications.prefix(2), id: \.key) { notification in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: DroppySpacing.xsm) {
+                            AppIcon(image: droplet.icon(for: notification), size: 16)
+                            Text(notification.headline)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                                .lineLimit(1)
+                        }
+                        Text(notification.body)
+                            .font(.system(size: 11))
+                            .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+                            .lineLimit(2)
+                    }
                 }
-                Text(latest.body)
-                    .font(.system(size: 11))
-                    .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                    .lineLimit(2)
-                if droplet.notifications.count > 1 {
-                    Text("+\(droplet.notifications.count - 1) more")
+                if droplet.notifications.count > 2 {
+                    Text("+\(droplet.notifications.count - 2) more")
                         .font(.system(size: 11))
                         .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
                 }
             }
-        } else {
-            Message(text: "No notifications")
         }
     }
 }
