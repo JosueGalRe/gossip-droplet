@@ -306,17 +306,29 @@ private struct GossipWidget: View {
         .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
     }
 
-    private var compactBody: some View {
-        VStack(alignment: .leading, spacing: DroppySpacing.xs) {
-            if let battery = droplet.phone?.battery {
-                Text("\(battery.level)%")
-                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+    /// The header already carries the battery, so the paired card spends its room on the newest notification.
+    @ViewBuilder private var compactBody: some View {
+        if let latest = droplet.notifications.first {
+            VStack(alignment: .leading, spacing: DroppySpacing.xs) {
+                HStack(spacing: DroppySpacing.xsm) {
+                    AppIcon(image: droplet.icon(for: latest), size: 16)
+                    Text(latest.title.isEmpty ? latest.appName : latest.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                        .lineLimit(1)
+                }
+                Text(latest.body)
+                    .font(.system(size: 11))
+                    .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+                    .lineLimit(2)
+                if droplet.notifications.count > 1 {
+                    Text("+\(droplet.notifications.count - 1) more")
+                        .font(.system(size: 11))
+                        .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
+                }
             }
-            Text(droplet.notifications.isEmpty ? "No notifications" : "\(droplet.notifications.count) notifications")
-                .font(.system(size: 11))
-                .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+        } else {
+            Message(text: "No notifications")
         }
     }
 }

@@ -5,7 +5,7 @@
   },
   "activity" : [
     {
-      "at" : "2026-10-27T18:09:17Z",
+      "at" : "2026-10-27T18:44:46Z",
       "detail" : "present \"gossip.notification\" (card)",
       "refused" : false,
       "service" : "hud"
