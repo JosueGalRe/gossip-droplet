@@ -27,7 +27,7 @@ struct NotificationCard: View {
 
     /// The card's content height: one more row when there is something to do in a click.
     static func height(for notification: PhoneNotification) -> CGFloat {
-        QuickActions.hasAny(notification) ? 84 : 52
+        QuickActions.hasAny(notification) ? 76 : 44
     }
 
     var body: some View {
@@ -39,12 +39,15 @@ struct NotificationCard: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
                         .lineLimit(1)
+                    // A link is one long word: break it by character instead of losing the second line.
                     Text(notification.body)
                         .font(.system(size: 12))
                         .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
                         .lineLimit(2)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Spacer(minLength: 0)
                 if let picture = droplet.picture(for: notification) {
                     Image(nsImage: picture).resizable().aspectRatio(contentMode: .fill)
                         .frame(width: 40, height: 40)

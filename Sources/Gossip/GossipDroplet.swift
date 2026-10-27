@@ -614,6 +614,7 @@ extension GossipDroplet {
         droplet.isConnected = true
         // `GOSSIP_SAMPLE_PAGE=messages droppykit run …` shoots another page.
         droplet.page = ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_PAGE"].flatMap(Page.init(rawValue:)) ?? .notifications
+        let hudFirst = ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_HUD"] == "link"
         droplet.devices = [GossipDevice(id: "pixel", name: "Pixel 9 Pro XL", type: "androidPhone", online: true,
                                         battery: .init(level: 64, charging: false))]
         let now = Int64(Date().timeIntervalSince1970 * 1000)
@@ -636,6 +637,13 @@ extension GossipDroplet {
                               appName: "Messages", title: "+503 7000 0000", body: "Tu código es 482913", iconBase64: nil,
                               hasReply: true, timestamp: now - 7_200_000, replay: nil),
         ]
+        if hudFirst {
+            droplet.notifications.insert(PhoneNotification(
+                deviceId: "pixel", id: "6", appPackage: "com.whatsapp", appName: "WhatsApp", title: "Grupo del viernes: Diego Hernández",
+                body: "🔗 Bill Fanter on Instagram (www.instagram.com/reel/DQx4abcdEfGhIjk/?igsh=MTRmZ2x0)", iconBase64: nil,
+                hasReply: true, timestamp: now, replay: nil, actions: [NotificationAction(index: 1, title: "Mark as read"),
+                                                                     NotificationAction(index: 2, title: "Mute")]), at: 0)
+        }
         droplet.nowPlaying = ["pixel": NowPlaying(title: "Midnight City", artist: "M83", isPlaying: true, positionMs: 60_000,
                                                   durationMs: 243_000, packageName: "com.spotify.music", artworkBase64: nil)]
         let today = Date().timeIntervalSince1970
