@@ -5,7 +5,19 @@
   },
   "activity" : [
     {
-      "at" : "2026-10-27T18:44:46Z",
+      "at" : "2026-10-27T21:21:25Z",
+      "detail" : "register \"ring\"",
+      "refused" : false,
+      "service" : "shortcuts"
+    },
+    {
+      "at" : "2026-10-27T21:21:25Z",
+      "detail" : "register \"messages\"",
+      "refused" : false,
+      "service" : "shortcuts"
+    },
+    {
+      "at" : "2026-10-27T21:21:25Z",
       "detail" : "present \"gossip.notification\" (card)",
       "refused" : false,
       "service" : "hud"
@@ -19,10 +31,16 @@
     "declared" : [
       "network-client",
       "hud",
-      "shelf-write"
+      "shelf-write",
+      "global-shortcuts",
+      "lock-screen",
+      "menu-bar"
     ],
     "granted" : [
+      "global-shortcuts",
       "hud",
+      "lock-screen",
+      "menu-bar",
       "network-client",
       "shelf-write"
     ]
@@ -31,7 +49,10 @@
     "capabilities" : [
       "network-client",
       "hud",
-      "shelf-write"
+      "shelf-write",
+      "global-shortcuts",
+      "lock-screen",
+      "menu-bar"
     ],
     "category" : "Productivity",
     "creator" : "Bryan Galdámez",
@@ -39,14 +60,18 @@
     "id" : "gossip",
     "kit" : {
       "abi" : 1,
-      "minAPI" : "1.10.0"
+      "minAPI" : "1.11.0"
     },
     "minAppVersion" : "15.3.0",
     "name" : "Gossip",
-    "summary" : "Phone notifications and battery from Gossip",
+    "summary" : "Your Android phone in the notch, via Gossip",
     "surfaces" : [
       "shelf-widget",
-      "hud"
+      "hud",
+      "live-activity",
+      "lock-screen-status",
+      "menu-bar-extra",
+      "settings-pane"
     ],
     "typeID" : "gossip",
     "version" : "1.0.0"
@@ -59,11 +84,11 @@
     "apiVersion" : "1.20.1"
   },
   "liveActivity" : {
-    "publishing" : false,
-    "seat" : "none(idle)"
+    "publishing" : true,
+    "seat" : "compact"
   },
   "lockScreen" : {
-    "publishing" : false
+    "publishing" : true
   },
   "log" : [
 
@@ -79,12 +104,28 @@
   "schema" : "droppykit-harness-report\/1",
   "shelfWidgets" : [
     {
-      "contentHeight" : "fixed(140.0)",
+      "contentHeight" : "fixed(180.0)",
       "id" : "gossip",
       "preferredPairedWidth" : 210,
       "preferredSoloWidth" : 420,
       "systemImage" : "iphone",
-      "title" : "Gossip"
+      "title" : "Phone"
+    },
+    {
+      "contentHeight" : "fixed(76.0)",
+      "id" : "gossip.media",
+      "preferredPairedWidth" : 210,
+      "preferredSoloWidth" : 380,
+      "systemImage" : "music.note",
+      "title" : "Phone media"
+    },
+    {
+      "contentHeight" : "fixed(300.0)",
+      "id" : "gossip.messages",
+      "preferredPairedWidth" : 210,
+      "preferredSoloWidth" : 420,
+      "systemImage" : "message",
+      "title" : "Phone messages"
     }
   ],
   "shots" : [
@@ -108,10 +149,10 @@
       "verdict" : "provided"
     },
     {
-      "declared" : false,
-      "implemented" : false,
+      "declared" : true,
+      "implemented" : true,
       "surface" : "live-activity",
-      "verdict" : "not-provided"
+      "verdict" : "provided"
     },
     {
       "declared" : false,
@@ -120,10 +161,10 @@
       "verdict" : "not-provided"
     },
     {
-      "declared" : false,
-      "implemented" : false,
+      "declared" : true,
+      "implemented" : true,
       "surface" : "settings-pane",
-      "verdict" : "not-provided"
+      "verdict" : "provided"
     },
     {
       "declared" : true,
@@ -132,16 +173,16 @@
       "verdict" : "provided"
     },
     {
-      "declared" : false,
-      "implemented" : false,
+      "declared" : true,
+      "implemented" : true,
       "surface" : "lock-screen-status",
-      "verdict" : "not-provided"
+      "verdict" : "provided"
     },
     {
-      "declared" : false,
-      "implemented" : false,
+      "declared" : true,
+      "implemented" : true,
       "surface" : "menu-bar-extra",
-      "verdict" : "not-provided"
+      "verdict" : "provided"
     }
   ],
   "verdict" : "ok"

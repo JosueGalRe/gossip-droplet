@@ -25,6 +25,7 @@ let package = Package(
                 "Gossip",
                 .product(name: "DroppyKitHarness", package: "droppykit")
             ]
-        )
+        ),
+        .testTarget(name: "GossipTests", dependencies: ["Gossip"])
     ]
 )

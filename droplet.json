@@ -2,22 +2,29 @@
   "id": "gossip",
   "name": "Gossip",
   "version": "1.0.0",
-  "summary": "Phone notifications and battery from Gossip",
-  "description": "Shows the notifications and battery of the Android phone paired with the Gossip Mac app, announces new notifications in the notch, and replies to or dismisses them on the phone. Needs the Gossip fork with its Droppy bridge running on this Mac.",
+  "summary": "Your Android phone in the notch, via Gossip",
+  "description": "Shows the notifications, battery, media and SMS conversations of the Android phone paired with the Gossip Mac app. Announces new notifications in the notch, replies to and dismisses them, rings the phone, controls its media, and opens Gossip's mirroring and pairing. Needs the Gossip fork with its Droppy bridge running on this Mac.",
   "category": "Productivity",
   "kit": {
     "abi": 1,
-    "minAPI": "1.10.0"
+    "minAPI": "1.11.0"
   },
   "minAppVersion": "15.3.0",
   "capabilities": [
     "network-client",
     "hud",
-    "shelf-write"
+    "shelf-write",
+    "global-shortcuts",
+    "lock-screen",
+    "menu-bar"
   ],
   "surfaces": [
     "shelf-widget",
-    "hud"
+    "hud",
+    "live-activity",
+    "lock-screen-status",
+    "menu-bar-extra",
+    "settings-pane"
   ],
   "icon": "Gossip.icon",
   "creator": {
