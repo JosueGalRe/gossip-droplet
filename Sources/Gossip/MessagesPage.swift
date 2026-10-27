@@ -2,59 +2,38 @@ import DroppyKit
 import SwiftUI
 
 /// The phone's SMS conversations: the list, then one conversation with a field to answer in. Gossip refreshes the list
-/// only while this widget is on screen.
-struct MessagesWidget: View {
+/// only while this page is on screen.
+struct MessagesPage: View {
     @ObservedObject var droplet: GossipDroplet
     let context: ShelfWidgetContext
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DroppySpacing.sm) {
-            header
-            ConnectionGate(droplet: droplet) {
-                if context.isCompact {
-                    compactBody
-                } else if let thread = droplet.openThread {
+        Group {
+            if context.isCompact {
+                compactBody
+            } else if let thread = droplet.openThread {
+                VStack(alignment: .leading, spacing: DroppySpacing.sm) {
+                    HStack(spacing: DroppySpacing.xsm) {
+                        Button { droplet.openThread(nil) } label: { Image(systemName: "chevron.left") }
+                            .buttonStyle(DroppyCircleButtonStyle(size: 20))
+                            .accessibilityLabel("All conversations")
+                        Text(thread.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .droppyFlatGlassControls()
                     Conversation(droplet: droplet, thread: thread)
-                } else if droplet.threads.isEmpty {
-                    Message(text: droplet.messagesError ?? (droplet.messagesLoading ? "Loading conversations…" : "No conversations"))
-                } else {
-                    ThreadList(droplet: droplet)
                 }
+            } else if droplet.threads.isEmpty {
+                Message(text: droplet.messagesError ?? (droplet.messagesLoading ? "Loading conversations…" : "No conversations"))
+            } else {
+                ThreadList(droplet: droplet)
             }
-            Spacer(minLength: 0)
         }
-        .padding(context.contentInsets)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear { droplet.messagesVisible(true) }
         .onDisappear { droplet.messagesVisible(false) }
-    }
-
-    private var header: some View {
-        HStack(spacing: DroppySpacing.xsm) {
-            if !context.isCompact, droplet.openThread != nil {
-                Button { droplet.openThread(nil) } label: { Image(systemName: "chevron.left") }
-                    .buttonStyle(DroppyCircleButtonStyle(size: 20))
-                    .accessibilityLabel("All conversations")
-            } else {
-                Image(systemName: "message")
-                    .font(.system(size: 12, weight: .medium))
-            }
-            Text(droplet.openThread?.title ?? "Messages")
-                .font(.system(size: 12, weight: .semibold))
-                .lineLimit(1)
-            Spacer(minLength: 0)
-            if droplet.messagesLoading {
-                ProgressView().controlSize(.mini)
-            }
-            if !context.isCompact, droplet.openThread == nil {
-                Button { droplet.openInGossip("messages") } label: { Image(systemName: "square.and.pencil") }
-                    .buttonStyle(DroppyCircleButtonStyle(size: 20))
-                    .help("New message in Gossip")
-                    .accessibilityLabel("New message")
-            }
-        }
-        .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-        .droppyFlatGlassControls()
     }
 
     @ViewBuilder private var compactBody: some View {
@@ -75,7 +54,7 @@ struct MessagesWidget: View {
             }
             .lineLimit(1)
         } else {
-            Message(text: "No conversations")
+            Message(text: droplet.messagesLoading ? "Loading conversations…" : "No conversations")
         }
     }
 }

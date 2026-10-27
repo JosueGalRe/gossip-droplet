@@ -106,6 +106,7 @@ struct ConnectionGate<Content: View>: View {
 
 // MARK: - Phone widget
 
+/// The one widget: phone and battery in the header with its page switch, and the page below.
 struct PhoneWidget: View {
     @ObservedObject var droplet: GossipDroplet
     let context: ShelfWidgetContext
@@ -114,15 +115,10 @@ struct PhoneWidget: View {
         VStack(alignment: .leading, spacing: DroppySpacing.sm) {
             header
             ConnectionGate(droplet: droplet) {
-                if context.isCompact {
-                    compactBody
-                } else if let key = droplet.replyingTo,
-                          let notification = droplet.notifications.first(where: { $0.key == key }) {
-                    ReplyComposer(droplet: droplet, notification: notification)
-                } else if droplet.notifications.isEmpty {
-                    Message(text: "No notifications")
-                } else {
-                    NotificationList(droplet: droplet)
+                switch droplet.page {
+                case .notifications: NotificationsPage(droplet: droplet, context: context)
+                case .messages: MessagesPage(droplet: droplet, context: context)
+                case .media: MediaPage(droplet: droplet, context: context)
                 }
             }
             Spacer(minLength: 0)
@@ -135,9 +131,11 @@ struct PhoneWidget: View {
         HStack(spacing: DroppySpacing.xsm) {
             Image(systemName: "iphone")
                 .font(.system(size: 12, weight: .medium))
-            Text(droplet.phone?.name ?? "Phone")
-                .font(.system(size: 12, weight: .semibold))
-                .lineLimit(1)
+            if !context.isCompact {
+                Text(droplet.phone?.name ?? "Phone")
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+            }
             if let phone = droplet.phone, !phone.online {
                 Text("offline")
                     .font(.system(size: 11))
@@ -159,12 +157,67 @@ struct PhoneWidget: View {
                     .help("Mirror phone or open its apps")
                     .accessibilityLabel("Mirror phone")
             }
+            if droplet.isConnected, droplet.phone != nil {
+                PageSwitch(droplet: droplet)
+            }
         }
         .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
         .droppyFlatGlassControls()
+        .frame(height: 24)
+    }
+}
+
+/// Three small discs in one track, as in OpenChamber's widget: the page showing is green.
+private struct PageSwitch: View {
+    @ObservedObject var droplet: GossipDroplet
+
+    var body: some View {
+        HStack(spacing: 2) {
+            segment(.notifications, symbol: "bell", label: "Notifications")
+            segment(.messages, symbol: "message", label: "Messages")
+            segment(.media, symbol: "music.note", label: "Media")
+        }
+        .padding(2)
+        .background(AdaptiveColors.notchSurfaceCardFill, in: Capsule())
     }
 
-    /// The header already carries the battery, so the paired card spends its room on the newest notification.
+    private func segment(_ page: GossipDroplet.Page, symbol: String, label: String) -> some View {
+        let selected = droplet.page == page
+        return Button { droplet.select(page) } label: {
+            Image(systemName: symbol).font(.system(size: 10, weight: .semibold))
+        }
+        .buttonStyle(DroppyCircleButtonStyle(
+            size: 20,
+            destructive: false,
+            solidFill: selected ? Color.green.opacity(0.24) : Color.clear,
+            foregroundColorOverride: selected ? .green : AdaptiveColors.notchSurfaceTertiaryText
+        ))
+        .help(label)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+// MARK: - Notifications page
+
+private struct NotificationsPage: View {
+    @ObservedObject var droplet: GossipDroplet
+    let context: ShelfWidgetContext
+
+    var body: some View {
+        if context.isCompact {
+            compactBody
+        } else if let key = droplet.replyingTo,
+                  let notification = droplet.notifications.first(where: { $0.key == key }) {
+            ReplyComposer(droplet: droplet, notification: notification)
+        } else if droplet.notifications.isEmpty {
+            Message(text: "No notifications")
+        } else {
+            NotificationList(droplet: droplet)
+        }
+    }
+
+    /// The paired card spends its room on the newest notification.
     @ViewBuilder private var compactBody: some View {
         if let latest = droplet.notifications.first {
             VStack(alignment: .leading, spacing: DroppySpacing.xs) {
@@ -296,42 +349,33 @@ private struct ReplyComposer: View {
     }
 }
 
-// MARK: - Media widget
+// MARK: - Media page
 
-struct MediaWidget: View {
+private struct MediaPage: View {
     @ObservedObject var droplet: GossipDroplet
     let context: ShelfWidgetContext
 
     var body: some View {
-        ConnectionGate(droplet: droplet) {
-            if let media = droplet.currentMedia {
-                HStack(spacing: DroppySpacing.md) {
-                    MediaArtwork(image: droplet.artwork(for: media.deviceID), size: context.isCompact ? 36 : 52)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(media.playing.title)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                        Text(media.playing.artist)
-                            .font(.system(size: 11))
-                            .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                    }
-                    .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if !context.isCompact {
-                        controls(isPlaying: media.playing.isPlaying)
-                    }
-                }
-            } else {
-                HStack(spacing: DroppySpacing.xsm) {
-                    Image(systemName: "music.note")
-                        .font(.system(size: 12, weight: .medium))
+        if let media = droplet.currentMedia {
+            HStack(spacing: DroppySpacing.md) {
+                MediaArtwork(image: droplet.artwork(for: media.deviceID), size: context.isCompact ? 36 : 52)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(media.playing.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                    Text(media.playing.artist)
+                        .font(.system(size: 11))
                         .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                    Message(text: "Nothing playing on the phone")
+                }
+                .lineLimit(1)
+                Spacer(minLength: 0)
+                if !context.isCompact {
+                    controls(isPlaying: media.playing.isPlaying)
                 }
             }
+        } else {
+            Message(text: "Nothing playing on the phone")
         }
-        .padding(context.contentInsets)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
     private func controls(isPlaying: Bool) -> some View {
@@ -369,7 +413,7 @@ struct PhoneMenu: View {
                 }
                 Button(droplet.isRingingPhone ? "Stop ringing" : "Ring phone") { droplet.ringPhone() }
                 Button("Mirror phone…") { droplet.openInGossip("mirror") }
-                Button("Messages…") { droplet.openInGossip("messages") }
+                Button("Messages") { droplet.reveal(.messages) }
             } else {
                 Text(droplet.isConnected ? "No phone paired" : "Gossip isn't running")
                     .font(.system(size: 13))

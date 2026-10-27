@@ -43,7 +43,7 @@ struct NotificationCard: View {
                 Button("Dismiss") { droplet.dismiss(notification) }
                     .buttonStyle(DroppyQuietButtonStyle(size: .small))
                 Button(notification.hasReply ? "Reply" : "Show") {
-                    droplet.revealPhoneWidget()
+                    droplet.revealNotifications()
                     if notification.hasReply { droplet.startReply(to: notification) }
                 }
                 .buttonStyle(DroppyAccentButtonStyle(size: .small))

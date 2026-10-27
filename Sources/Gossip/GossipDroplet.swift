@@ -24,12 +24,25 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     /// Must equal `DroppyDropletID` in the bundle's Info.plist and `id` in
     /// droplet.json. The loader refuses the bundle if the three disagree.
     public nonisolated static let id: DropletID = "gossip"
-    static let phoneWidgetID: ShelfWidgetID = "gossip"
-    static let mediaWidgetID: ShelfWidgetID = "gossip.media"
-    static let messagesWidgetID: ShelfWidgetID = "gossip.messages"
+    /// The one widget, with a page per part of the phone, switched from its header like OpenChamber's.
+    static let widgetID: ShelfWidgetID = "gossip"
     static let notificationHUDID = "gossip.notification"
     static let batteryHUDID = "gossip.battery"
 
+    enum Page: String, Codable, CaseIterable {
+        case notifications, messages, media
+
+        /// Each page's height, so the shelf is only as tall as the page showing.
+        var contentHeight: CGFloat {
+            switch self {
+            case .notifications: 180
+            case .messages: 280
+            case .media: 100
+            }
+        }
+    }
+
+    @Published private(set) var page: Page = .notifications
     @Published private(set) var isConnected = false
     @Published private(set) var devices: [GossipDevice] = []
     @Published private(set) var ringing: Set<String> = []
@@ -69,6 +82,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     public func activate(host: DropletHost) throws {
         self.host = host
+        if !isSample { page = host.preferences.value(forKey: "page", default: Page.notifications) }
         registerShortcuts()
         guard !isSample else {
             // So the harness's surfaces have something to draw.
@@ -191,6 +205,21 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         }
     }
 
+    // MARK: Pages
+
+    func select(_ page: Page) {
+        guard page != self.page else { return }
+        self.page = page
+        host?.preferences.setValue(page, forKey: "page")
+        host?.shelf.invalidateLayout(for: Self.widgetID)
+    }
+
+    /// Opens the shelf on one page of the widget.
+    func reveal(_ page: Page) {
+        select(page)
+        host?.shelf.open(revealing: Self.widgetID)
+    }
+
     // MARK: Phone
 
     var phone: GossipDevice? {
@@ -253,10 +282,10 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         replyText = ""
     }
 
-    func revealPhoneWidget() {
+    func revealNotifications() {
         host?.hud.dismiss(id: Self.notificationHUDID)
         hudKey = nil
-        host?.shelf.open(revealing: Self.phoneWidgetID)
+        reveal(.notifications)
     }
 
     func icon(for notification: PhoneNotification) -> NSImage? {
@@ -396,7 +425,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             self?.ringPhone()
         }
         host?.shortcuts.register(id: "messages", title: "Show phone messages", defaultShortcut: nil) { [weak self] in
-            self?.host?.shelf.open(revealing: Self.messagesWidgetID)
+            self?.reveal(.messages)
         }
     }
 
@@ -436,6 +465,8 @@ extension GossipDroplet {
     public static func sample() -> GossipDroplet {
         let droplet = GossipDroplet(sample: ())
         droplet.isConnected = true
+        // `GOSSIP_SAMPLE_PAGE=messages droppykit run …` shoots another page.
+        droplet.page = ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_PAGE"].flatMap(Page.init(rawValue:)) ?? .notifications
         droplet.devices = [GossipDevice(id: "pixel", name: "Pixel 9 Pro XL", type: "androidPhone", online: true,
                                         battery: .init(level: 64, charging: false))]
         let now = Int64(Date().timeIntervalSince1970 * 1000)
@@ -474,40 +505,19 @@ extension GossipDroplet: ShelfWidgetProviding {
     public var widgetDescriptors: [ShelfWidgetDescriptor] {
         [
             ShelfWidgetDescriptor(
-                id: Self.phoneWidgetID,
+                id: Self.widgetID,
                 title: "Phone",
                 systemImage: "iphone",
-                layoutTraits: ShelfWidgetLayoutTraits(preferredSoloWidth: 420, preferredPairedWidth: 210,
-                                                      contentHeight: .fixed(180)),
+                layoutTraits: ShelfWidgetLayoutTraits(preferredSoloWidth: 420, preferredPairedWidth: 220,
+                                                      contentHeight: .fixed(page.contentHeight)),
                 focusPolicy: .keyboardFocusable,
-                searchKeywords: ["gossip", "android", "notifications", "battery"]
-            ),
-            ShelfWidgetDescriptor(
-                id: Self.mediaWidgetID,
-                title: "Phone media",
-                systemImage: "music.note",
-                layoutTraits: ShelfWidgetLayoutTraits(preferredSoloWidth: 380, preferredPairedWidth: 210,
-                                                      contentHeight: .fixed(76)),
-                searchKeywords: ["gossip", "android", "music", "now playing"]
-            ),
-            ShelfWidgetDescriptor(
-                id: Self.messagesWidgetID,
-                title: "Phone messages",
-                systemImage: "message",
-                layoutTraits: ShelfWidgetLayoutTraits(preferredSoloWidth: 420, preferredPairedWidth: 210,
-                                                      contentHeight: .fixed(300)),
-                focusPolicy: .keyboardFocusable,
-                searchKeywords: ["gossip", "android", "sms", "messages"]
+                searchKeywords: ["gossip", "android", "notifications", "battery", "sms", "messages", "music"]
             ),
         ]
     }
 
     public func makeWidgetView(_ id: ShelfWidgetID, context: ShelfWidgetContext) -> AnyView {
-        switch id {
-        case Self.mediaWidgetID: AnyView(MediaWidget(droplet: self, context: context))
-        case Self.messagesWidgetID: AnyView(MessagesWidget(droplet: self, context: context))
-        default: AnyView(PhoneWidget(droplet: self, context: context))
-        }
+        AnyView(PhoneWidget(droplet: self, context: context))
     }
 
     public func makeWidgetSettingsPopover(_ id: ShelfWidgetID) -> AnyView? { nil }
@@ -569,7 +579,7 @@ extension GossipDroplet: DropletURLHandling {
         case "ring": ringPhone()
         case "mirror": openInGossip("mirror")
         case "pair": openInGossip("pair")
-        case "messages": host?.shelf.open(revealing: Self.messagesWidgetID)
+        case "messages": reveal(.messages)
         default: host?.log.info("unknown URL path \(request.path)")
         }
     }
