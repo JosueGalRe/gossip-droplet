@@ -628,18 +628,31 @@ struct GossipSettings: View {
                 settingsSectionHeader("Apps")
             } content: {
                 DropletSettingsCard {
-                    if droplet.knownApps.isEmpty {
-                        DropletControlRow(title: "Apps appear here after their first notification") { EmptyView() }
-                    }
-                    ForEach(droplet.knownApps.sorted { $0.value < $1.value }, id: \.key) { package, name in
-                        DropletControlRow(title: name) {
-                            Picker(name, selection: mode(for: package)) {
-                                ForEach(AppMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    // Only the apps that do not announce; the rest are switched on the apps page.
+                    ForEach(droplet.appExceptions, id: \.self) { package in
+                        SettingsAppRow(icon: droplet.appIcons[package], name: droplet.appName(package)) {
+                            Picker(droplet.appName(package), selection: mode(for: package)) {
+                                Text(AppMode.show.rawValue).tag(AppMode.show)
+                                Text(AppMode.hide.rawValue).tag(AppMode.hide)
                             }
                             .labelsHidden()
                             .pickerStyle(.menu)
                             .fixedSize()
+                            Button { mode(for: package).wrappedValue = .announce } label: {
+                                Image(systemName: "minus.circle.fill").font(.system(size: 14))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help("Announce again")
+                            .accessibilityLabel("Announce \(droplet.appName(package)) again")
                         }
+                    }
+                    DropletSettingsPageLink("Phone apps", subtitle: appsSummary, page: AppsPage.id) {
+                        Image(systemName: "app.badge")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(Color.green.gradient, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                     }
                 }
             }
@@ -651,6 +664,16 @@ struct GossipSettings: View {
                 }
             }
         }
+        .onAppear { droplet.appsVisible(true) }
+        .onDisappear { droplet.appsVisible(false) }
+    }
+
+    private var appsSummary: String {
+        let hidden = droplet.hiddenApps.count
+        let quiet = droplet.appExceptions.count - hidden
+        guard quiet + hidden > 0 else { return "Every app announces. Turn off the ones that should stay quiet." }
+        return [quiet > 0 ? "\(quiet) quiet" : nil, hidden > 0 ? "\(hidden) hidden" : nil]
+            .compactMap { $0 }.joined(separator: ", ") + "; the rest announce."
     }
 
     private var pauseTitle: String {

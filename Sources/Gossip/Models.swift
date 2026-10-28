@@ -161,3 +161,12 @@ struct LowBatteryLatch {
         return true
     }
 }
+
+/// An app on the phone that has a launcher icon, as Gossip's app catalog has it.
+struct PhoneApp: Decodable, Equatable, Identifiable {
+    let package: String
+    let label: String
+    let icon: String?
+
+    var id: String { package }
+}

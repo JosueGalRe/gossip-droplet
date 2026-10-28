@@ -98,6 +98,9 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         registerShortcuts()
         guard !isSample else {
             // So the harness's surfaces have something to draw.
+            setMuted("com.zhiliaoapp.musically", true)
+            setMuted("com.pizzahut.sv", true)
+            setHidden("com.pizzahut.sv", true)
             publishActivity()
             publishLockScreen()
             if let first = notifications.first {
@@ -156,6 +159,10 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         let nowPlaying: NowPlaying?
     }
     private struct Threads: Decodable { let threads: [MessageThread] }
+    private struct Apps: Decodable {
+        let apps: [PhoneApp]
+        let error: String?
+    }
     private struct History: Decodable {
         let threadId: String
         let messages: [ChatMessage]
@@ -227,6 +234,14 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             publishActivity()
         case "messages.threads":
             if let list = try? decoder.decode(Threads.self, from: line) { threads = list.threads }
+        case "apps":
+            guard let list = try? decoder.decode(Apps.self, from: line) else { return }
+            // Icons follow the list in batches; each one is decoded once.
+            for app in list.apps where appIcons[app.package] == nil {
+                if let base64 = app.icon, let data = Data(base64Encoded: base64) { appIcons[app.package] = NSImage(data: data) }
+            }
+            phoneAppsError = list.error
+            if list.error == nil { phoneApps = list.apps }
         case "messages.history":
             guard let history = try? decoder.decode(History.self, from: line), history.threadId == openThreadID else { return }
             conversation = history.messages
@@ -455,6 +470,48 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         host?.preferences.value(forKey: "show", default: true) ?? true
     }
 
+    // MARK: Apps
+
+    /// The phone's apps while the settings are open, `nil` until the phone answers.
+    @Published private(set) var phoneApps: [PhoneApp]?
+    @Published private(set) var phoneAppsError: String?
+    private(set) var appIcons: [String: NSImage] = [:]
+    @Published var appQuery = ""
+    private var appsViewers = 0
+
+    /// The settings and the apps page ask for the phone's apps while they show.
+    func appsVisible(_ visible: Bool) {
+        appsViewers = max(0, appsViewers + (visible ? 1 : -1))
+        if visible, appsViewers == 1, let phone {
+            client?.send(["type": "apps", "deviceId": phone.id])
+        } else if !visible, appsViewers == 0 {
+            client?.send(["type": "apps.close"])
+            appQuery = ""
+        }
+    }
+
+    /// Every app the settings can name: the phone's launchable ones, and those without a launcher icon (system apps)
+    /// that have shown a notification.
+    var allApps: [(package: String, name: String)] {
+        var names = knownApps
+        for app in phoneApps ?? [] { names[app.package] = app.label }
+        return names.map { (package: $0.key, name: $0.value) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func appName(_ package: String) -> String {
+        phoneApps?.first { $0.package == package }?.label ?? knownApps[package] ?? package
+    }
+
+    /// The apps that do not announce: quiet in the widget only, or hidden from it too. Every other app announces.
+    var appExceptions: [String] {
+        mutedApps.union(hiddenApps).sorted { appName($0).localizedCaseInsensitiveCompare(appName($1)) == .orderedAscending }
+    }
+
+    var mutedApps: Set<String> {
+        Set(host?.preferences.value(forKey: "mutedApps", as: [String].self) ?? [])
+    }
+
     var hiddenApps: Set<String> {
         Set(host?.preferences.value(forKey: "hiddenApps", as: [String].self) ?? [])
     }
@@ -491,12 +548,10 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         host?.preferences.value(forKey: "knownApps", as: [String: String].self) ?? [:]
     }
 
-    func isMuted(_ package: String) -> Bool {
-        (host?.preferences.value(forKey: "mutedApps", as: [String].self) ?? []).contains(package)
-    }
+    func isMuted(_ package: String) -> Bool { mutedApps.contains(package) }
 
     func setMuted(_ package: String, _ muted: Bool) {
-        var list = Set(host?.preferences.value(forKey: "mutedApps", as: [String].self) ?? [])
+        var list = mutedApps
         if muted { list.insert(package) } else { list.remove(package) }
         setPreference(list.sorted(), forKey: "mutedApps")
     }
@@ -753,6 +808,18 @@ extension GossipDroplet {
             droplet.page = .notifications
             droplet.focusedKey = droplet.notifications[0].key
         }
+        let apps = [("com.anthropic.claude", "Claude", NSColor.systemOrange), ("com.google.android.gm", "Gmail", .systemRed),
+                    ("com.pizzahut.sv", "Pizza Hut El Salvador", .systemRed), ("com.Slack", "Slack", .systemPurple),
+                    ("org.telegram.messenger", "Telegram", .systemBlue), ("com.zhiliaoapp.musically", "TikTok", .black),
+                    ("com.whatsapp", "WhatsApp", .systemGreen)]
+        droplet.phoneApps = apps.map { PhoneApp(package: $0.0, label: $0.1, icon: nil) }
+        for (package, _, color) in apps {
+            droplet.appIcons[package] = NSImage(size: NSSize(width: 48, height: 48), flipped: false) { rect in
+                color.setFill()
+                rect.fill()
+                return true
+            }
+        }
         if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_QUIET"] != nil {
             // Nothing in progress and nothing playing: home fills with the latest notifications.
             droplet.notifications.removeAll { $0.live != nil }
@@ -858,9 +925,21 @@ extension GossipDroplet: DropletURLHandling {
     }
 }
 
-extension GossipDroplet: SettingsPaneProviding {
+extension GossipDroplet: SettingsPagesProviding {
     public func makeSettingsPane(context: SettingsPaneContext) -> AnyView {
-        AnyView(GossipSettings(droplet: self))
+        // The harness draws no pages of a pane: GOSSIP_SAMPLE_SETTINGS=apps draws the apps page in its place.
+        if isSample, ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_SETTINGS"] == AppsPage.id {
+            return AnyView(AppsPage(droplet: self))
+        }
+        return AnyView(GossipSettings(droplet: self))
+    }
+
+    public func makeSettingsPage(id: String, context: SettingsPaneContext) -> AnyView? {
+        id == AppsPage.id ? AnyView(AppsPage(droplet: self)) : nil
+    }
+
+    public func makeSettingsPageToolbar(id: String, context: SettingsPaneContext) -> AnyView? {
+        id == AppsPage.id ? AnyView(AppsPage.Toolbar(droplet: self)) : nil
     }
 
     public var settingsSearchEntries: [SettingsSearchEntry] {
