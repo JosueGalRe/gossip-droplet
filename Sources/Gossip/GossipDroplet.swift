@@ -29,20 +29,30 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     static let notificationHUDID = "gossip.notification"
     static let batteryHUDID = "gossip.battery"
 
+    /// Home first: the phone at a glance, what is going on and what is playing. Then the notification history and the
+    /// SMS conversations.
     enum Page: String, Codable, CaseIterable {
-        case notifications, messages, media
+        case home, notifications, messages
+    }
 
-        /// Each page's height, so the shelf is only as tall as the page showing.
-        var contentHeight: CGFloat {
-            switch self {
-            case .notifications: 180
-            case .messages: 280
-            case .media: 128
-            }
+    @Published private(set) var page: Page = .home
+
+    /// The page's height, so the shelf is only as tall as the page showing. Home grows a tile for something in progress
+    /// and one for what is playing, and shows the latest notification when it has neither.
+    var contentHeight: CGFloat {
+        switch page {
+        case .home:
+            let tiles = (homeShowsLive ? 1 : 0) + (homeShowsMedia ? 1 : 0)
+            return 16 + 24 + 8 + 62 + (tiles == 0 ? 8 + 44 : CGFloat(tiles) * 8 + (homeShowsLive ? 46 : 0) + (homeShowsMedia ? 70 : 0))
+        case .notifications: return 196
+        case .messages: return 280
         }
     }
 
-    @Published private(set) var page: Page = .notifications
+    var homeShowsLive: Bool { !liveNotifications.isEmpty }
+    var homeShowsMedia: Bool { currentMedia != nil }
+    /// What home's height was last measured for, so the shelf is re-measured only when a tile comes or goes.
+    private var measuredHome: (live: Bool, media: Bool) = (false, false)
     @Published private(set) var isConnected = false
     @Published private(set) var devices: [GossipDevice] = []
     @Published private(set) var ringing: Set<String> = []
@@ -86,7 +96,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     public func activate(host: DropletHost) throws {
         self.host = host
-        if !isSample { page = host.preferences.value(forKey: "page", default: Page.notifications) }
+        if !isSample { page = host.preferences.value(forKey: "page", default: Page.home) }
         registerShortcuts()
         guard !isSample else {
             // So the harness's surfaces have something to draw.
@@ -240,10 +250,30 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         host?.shelf.invalidateLayout(for: Self.widgetID)
     }
 
-    /// Opens the shelf on one page of the widget.
+    /// Opens the shelf on one page of the widget, alone, so it shows its full composition.
     func reveal(_ page: Page) {
         select(page)
         host?.shelf.open(revealing: Self.widgetID)
+    }
+
+    /// From the narrow card: the full widget, on the notification history with this one open.
+    func open(_ notification: PhoneNotification) {
+        expandedKey = notification.key
+        reveal(.notifications)
+    }
+
+    /// From the narrow card: the full widget, in this conversation.
+    func open(_ thread: MessageThread) {
+        reveal(.messages)
+        openThread(thread)
+    }
+
+    /// Home's tiles come and go with what is in progress and what is playing; re-measure the shelf when they do.
+    private func homeCompositionChanged() {
+        let now = (homeShowsLive, homeShowsMedia)
+        guard now != measuredHome else { return }
+        measuredHome = now
+        if page == .home { host?.shelf.invalidateLayout(for: Self.widgetID) }
     }
 
     // MARK: Phone
@@ -640,6 +670,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     }
 
     private func publishActivity() {
+        homeCompositionChanged()
         switch activityFocus {
         case .live(let notification):
             activitySubject.send(LiveActivityState(
@@ -680,7 +711,7 @@ extension GossipDroplet {
         let droplet = GossipDroplet(sample: ())
         droplet.isConnected = true
         // `GOSSIP_SAMPLE_PAGE=messages droppykit run …` shoots another page.
-        droplet.page = ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_PAGE"].flatMap(Page.init(rawValue:)) ?? .notifications
+        droplet.page = ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_PAGE"].flatMap(Page.init(rawValue:)) ?? .home
         let sampleHUD = ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_HUD"]
         let hudFirst = sampleHUD == "link" || sampleHUD == "long"
         let sampleBody = sampleHUD == "long"
@@ -744,7 +775,7 @@ extension GossipDroplet: ShelfWidgetProviding {
                 title: "Phone",
                 systemImage: "iphone",
                 layoutTraits: ShelfWidgetLayoutTraits(preferredSoloWidth: 420, preferredPairedWidth: 220,
-                                                      contentHeight: .fixed(page.contentHeight)),
+                                                      contentHeight: .fixed(contentHeight)),
                 focusPolicy: .keyboardFocusable,
                 searchKeywords: ["gossip", "android", "notifications", "battery", "sms", "messages", "music"]
             ),

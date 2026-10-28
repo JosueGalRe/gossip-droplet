@@ -36,22 +36,37 @@ struct MessagesPage: View {
         .onDisappear { droplet.messagesVisible(false) }
     }
 
-    /// The paired card shows the three newest conversations, one line each.
+    /// Narrow: the three newest conversations, each a button to the full widget in that conversation.
     @ViewBuilder private var compactBody: some View {
         if droplet.threads.isEmpty {
             Message(text: droplet.messagesLoading ? "Loading conversations…" : "No conversations")
         } else {
-            VStack(alignment: .leading, spacing: DroppySpacing.sm) {
+            VStack(alignment: .leading, spacing: 2) {
                 ForEach(droplet.threads.prefix(3)) { thread in
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(thread.title)
-                            .font(.system(size: 12, weight: thread.unread > 0 ? .bold : .semibold))
-                            .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                        Text((thread.outgoing ? "You: " : "") + thread.snippet)
-                            .font(.system(size: 11))
-                            .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+                    Button { droplet.open(thread) } label: {
+                        HStack(spacing: DroppySpacing.sm) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(thread.title)
+                                    .font(.system(size: 12, weight: thread.unread > 0 ? .bold : .semibold))
+                                    .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                                Text((thread.outgoing ? "You: " : "") + thread.snippet)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+                            }
+                            .lineLimit(1)
+                            Spacer(minLength: 0)
+                            if thread.unread > 0 { Circle().fill(Color.accentColor).frame(width: 6, height: 6) }
+                        }
+                        .padding(.horizontal, DroppySpacing.xs)
+                        .padding(.vertical, 3)
+                        .contentShape(Rectangle())
+                        .hoverHighlight()
                     }
-                    .lineLimit(1)
+                    .buttonStyle(.plain)
+                }
+                if droplet.threads.count > 3 {
+                    SeeAllButton(count: droplet.threads.count) { droplet.reveal(.messages) }
+                        .padding(.top, DroppySpacing.xs)
                 }
             }
         }

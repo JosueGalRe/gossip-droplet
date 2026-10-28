@@ -168,9 +168,9 @@ struct PhoneWidget: View {
             header
             ConnectionGate(droplet: droplet) {
                 switch droplet.page {
+                case .home: HomePage(droplet: droplet, context: context)
                 case .notifications: NotificationsPage(droplet: droplet, context: context)
                 case .messages: MessagesPage(droplet: droplet, context: context)
-                case .media: MediaPage(droplet: droplet, context: context)
                 }
             }
             Spacer(minLength: 0)
@@ -184,7 +184,10 @@ struct PhoneWidget: View {
             if context.isCompact {
                 // Narrow: the battery is the phone's status, in the title's place, and the switch takes the rest.
                 if let battery = droplet.phone?.battery {
-                    BatteryLabel(battery: battery)
+                    BatteryRing(level: battery.level, charging: battery.charging, size: 14, lineWidth: 2.5)
+                    Text("\(battery.level)%")
+                        .font(.system(size: 12, weight: .semibold))
+                        .monospacedDigit()
                 } else {
                     Image(systemName: "iphone").font(.system(size: 12, weight: .medium))
                 }
@@ -194,16 +197,11 @@ struct PhoneWidget: View {
                 Text(droplet.phone?.name ?? "Phone")
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
-            }
-            if let phone = droplet.phone, !phone.online {
-                Text("offline")
-                    .font(.system(size: 11))
-                    .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
+                if let phone = droplet.phone {
+                    ConnectionLabel(phone: phone)
+                }
             }
             Spacer(minLength: 0)
-            if !context.isCompact, let battery = droplet.phone?.battery {
-                BatteryLabel(battery: battery)
-            }
             if !context.isCompact, droplet.phone != nil {
                 Button { droplet.ringPhone() } label: {
                     Image(systemName: droplet.isRingingPhone ? "bell.slash.fill" : "bell.and.waves.left.and.right")
@@ -226,15 +224,36 @@ struct PhoneWidget: View {
     }
 }
 
+/// How the phone is reached: a green dot on the local network, blue through the relay, grey when it is not.
+private struct ConnectionLabel: View {
+    let phone: GossipDevice
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(text).font(.system(size: 11)).foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var color: Color {
+        !phone.online ? AdaptiveColors.notchSurfaceTertiaryText : phone.relayed == true ? .blue : .green
+    }
+
+    private var text: String {
+        !phone.online ? "Offline" : phone.relayed == true ? "Relay" : "Local"
+    }
+}
+
 /// Three small discs in one track, as in OpenChamber's widget: the page showing is green.
 private struct PageSwitch: View {
     @ObservedObject var droplet: GossipDroplet
 
     var body: some View {
         HStack(spacing: 2) {
+            segment(.home, symbol: "house", label: "Phone")
             segment(.notifications, symbol: "bell", label: "Notifications")
             segment(.messages, symbol: "message", label: "Messages")
-            segment(.media, symbol: "music.note", label: "Media")
         }
         .padding(2)
         .background(AdaptiveColors.notchSurfaceCardFill, in: Capsule())
@@ -276,32 +295,22 @@ private struct NotificationsPage: View {
         }
     }
 
-    /// The paired card spends its room on the two newest notifications.
+    /// Narrow: the newest three, each a button to the full widget with that one open, and the way to the rest.
     @ViewBuilder private var compactBody: some View {
-        if droplet.visibleNotifications.isEmpty {
+        let list = droplet.visibleNotifications
+        if list.isEmpty {
             Message(text: "No notifications")
         } else {
-            VStack(alignment: .leading, spacing: DroppySpacing.sm) {
-                ForEach(droplet.visibleNotifications.prefix(2), id: \.key) { notification in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: DroppySpacing.xsm) {
-                            AppIcon(image: droplet.avatar(for: notification) ?? droplet.icon(for: notification), size: 16,
-                                    round: droplet.avatar(for: notification) != nil)
-                            Text(notification.headline)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                                .lineLimit(1)
-                        }
-                        Text(notification.body)
-                            .font(.system(size: 11))
-                            .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                            .lineLimit(2)
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(list.prefix(3), id: \.key) { notification in
+                    Button { droplet.open(notification) } label: {
+                        CompactNotificationRow(droplet: droplet, notification: notification)
                     }
+                    .buttonStyle(.plain)
                 }
-                if droplet.visibleNotifications.count > 2 {
-                    Text("+\(droplet.visibleNotifications.count - 2) more")
-                        .font(.system(size: 11))
-                        .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
+                if list.count > 3 {
+                    SeeAllButton(count: list.count) { droplet.reveal(.notifications) }
+                        .padding(.top, DroppySpacing.xs)
                 }
             }
         }
@@ -348,12 +357,13 @@ private struct NotificationRow: View {
     @ObservedObject var droplet: GossipDroplet
     let notification: PhoneNotification
     let now: Date
+    @State private var hovering = false
 
     private var expanded: Bool { droplet.expandedKey == notification.key }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DroppySpacing.xs) {
-            HStack(spacing: DroppySpacing.sm) {
+            HStack(alignment: .top, spacing: DroppySpacing.sm) {
                 Group {
                     if let avatar = droplet.avatar(for: notification) {
                         AppIcon(image: avatar, size: 22, round: true)
@@ -363,42 +373,45 @@ private struct NotificationRow: View {
                 }
                 .frame(width: 22, height: 22)
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: DroppySpacing.xs) {
-                        Text(notification.headline)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                        Text(RelativeTime.short(notification.date, now: now))
-                            .font(.system(size: 11))
-                            .monospacedDigit()
-                            .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
-                    }
+                    Text(notification.headline)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                        .lineLimit(1)
                     Text(notification.body)
                         .font(.system(size: 11))
                         .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
                         .lineLimit(expanded ? nil : 1)
                         .fixedSize(horizontal: false, vertical: expanded)
                 }
-                .lineLimit(1)
                 Spacer(minLength: 0)
-                if !expanded, let picture = droplet.picture(for: notification) {
-                    Image(nsImage: picture).resizable().aspectRatio(contentMode: .fill)
-                        .frame(width: 28, height: 28)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                }
-                if notification.hasReply {
-                    Button { droplet.startReply(to: notification) } label: { Image(systemName: "arrowshape.turn.up.left") }
-                        .buttonStyle(DroppyCircleButtonStyle(size: 20))
-                        .help("Reply")
-                        .accessibilityLabel("Reply to \(notification.headline)")
-                }
-                Button { droplet.dismiss(notification) } label: { Image(systemName: "xmark") }
+                // The time and the thumbnail at rest; the row's buttons under the pointer or when it is open.
+                if hovering || expanded {
+                    HStack(spacing: DroppySpacing.xs) {
+                        if notification.hasReply {
+                            Button { droplet.startReply(to: notification) } label: { Image(systemName: "arrowshape.turn.up.left") }
+                                .help("Reply")
+                                .accessibilityLabel("Reply to \(notification.headline)")
+                        }
+                        Button { droplet.dismiss(notification) } label: { Image(systemName: "xmark") }
+                            .help("Dismiss on phone")
+                            .accessibilityLabel("Dismiss \(notification.headline)")
+                    }
                     .buttonStyle(DroppyCircleButtonStyle(size: 20))
-                    .help("Dismiss on phone")
-                    .accessibilityLabel("Dismiss \(notification.headline)")
+                } else {
+                    if let picture = droplet.picture(for: notification) {
+                        Image(nsImage: picture).resizable().aspectRatio(contentMode: .fill)
+                            .frame(width: 26, height: 26)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    Text(RelativeTime.short(notification.date, now: now))
+                        .font(.system(size: 10))
+                        .monospacedDigit()
+                        .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
+                        .frame(minWidth: 24, alignment: .trailing)
+                }
             }
             .contentShape(Rectangle())
             .onTapGesture { droplet.toggleExpanded(notification) }
-            .accessibilityAction(named: expanded ? "Collapse" : "Expand") { droplet.toggleExpanded(notification) }
 
             if expanded {
                 VStack(alignment: .leading, spacing: DroppySpacing.xs) {
@@ -414,7 +427,15 @@ private struct NotificationRow: View {
                 .padding(.leading, 30)
             }
         }
+        .padding(.horizontal, DroppySpacing.xs)
+        .padding(.vertical, 3)
+        .background(hovering || expanded ? AdaptiveColors.notchSurfaceCardFill : Color.clear,
+                    in: RoundedRectangle(cornerRadius: DroppyRadius.small, style: .continuous))
+        .onHover { hovering = $0 }
         .droppyFlatGlassControls()
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: expanded ? "Collapse" : "Expand") { droplet.toggleExpanded(notification) }
+        .accessibilityAction(named: "Dismiss on phone") { droplet.dismiss(notification) }
     }
 }
 
@@ -525,62 +546,10 @@ private struct ReplyComposer: View {
     }
 }
 
-// MARK: - Media page
-
-private struct MediaPage: View {
-    @ObservedObject var droplet: GossipDroplet
-    let context: ShelfWidgetContext
-
-    var body: some View {
-        if let media = droplet.currentMedia {
-            VStack(alignment: .leading, spacing: DroppySpacing.sm) {
-                HStack(spacing: DroppySpacing.md) {
-                    MediaArtwork(image: droplet.artwork(for: media.deviceID), size: context.isCompact ? 36 : 48)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(media.playing.title)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                        Text(media.playing.artist)
-                            .font(.system(size: 11))
-                            .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                    }
-                    .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if !context.isCompact {
-                        controls(isPlaying: media.playing.isPlaying)
-                    }
-                }
-                if media.playing.durationMs > 0 {
-                    SeekBar(droplet: droplet, durationMs: media.playing.durationMs, interactive: !context.isCompact)
-                }
-            }
-        } else {
-            Message(text: "Nothing playing on the phone")
-        }
-    }
-
-    private func controls(isPlaying: Bool) -> some View {
-        HStack(spacing: DroppySpacing.xs) {
-            Button { droplet.volume(up: false) } label: { Image(systemName: "speaker.minus.fill") }
-                .accessibilityLabel("Volume down")
-            Button { droplet.media("previous") } label: { Image(systemName: "backward.fill") }
-                .accessibilityLabel("Previous")
-            Button { droplet.media(isPlaying ? "pause" : "play") } label: {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-            }
-            .accessibilityLabel(isPlaying ? "Pause" : "Play")
-            Button { droplet.media("next") } label: { Image(systemName: "forward.fill") }
-                .accessibilityLabel("Next")
-            Button { droplet.volume(up: true) } label: { Image(systemName: "speaker.plus.fill") }
-                .accessibilityLabel("Volume up")
-        }
-        .buttonStyle(DroppyCircleButtonStyle(size: 24))
-        .droppyFlatGlassControls()
-    }
-}
+// MARK: - Media
 
 /// The playback position, advancing on its own while it plays; click or drag to seek.
-private struct SeekBar: View {
+struct SeekBar: View {
     @ObservedObject var droplet: GossipDroplet
     let durationMs: Int
     let interactive: Bool

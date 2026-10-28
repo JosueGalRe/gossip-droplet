@@ -12,6 +12,8 @@ struct GossipDevice: Decodable, Equatable, Identifiable {
     let type: String
     let online: Bool
     let battery: Battery?
+    /// Online through the internet relay rather than the local network.
+    var relayed: Bool? = nil
 
     var isPhone: Bool { type != "mac" }
 }
