@@ -2,7 +2,7 @@ import DroppyKit
 import SwiftUI
 
 /// The phone at a glance: battery, what is waiting (notifications, unread SMS), what is in progress and what is playing.
-/// Each tile leads to its page. Narrow, it keeps the counts and one line each for the live item and the music.
+/// The counts lead to their pages. Narrow, it keeps the counts and one line each for the live item and the music.
 struct HomePage: View {
     @ObservedObject var droplet: GossipDroplet
     let context: ShelfWidgetContext
@@ -16,43 +16,86 @@ struct HomePage: View {
         .onDisappear { droplet.messagesVisible(false) }
     }
 
+    /// Wide: the phone at a glance on the left; on the right what is in progress, what is playing, and the newest
+    /// notifications in the room they leave.
     private var full: some View {
-        // The page is a fixed height: what is in progress and what is playing take their tiles, and the newest
-        // notifications fill the room left (three with neither, under a See all).
         let latest = droplet.visibleNotifications.filter { $0.live == nil }
-        let rows = max(0, 3 - (droplet.homeShowsLive ? 1 : 0) - (droplet.homeShowsMedia ? 2 : 0))
-        return VStack(alignment: .leading, spacing: DroppySpacing.sm) {
-            HStack(spacing: DroppySpacing.sm) {
-                BatteryTile(battery: droplet.phone?.battery)
-                StatTile(value: latest.count, label: "notifications") { droplet.select(.notifications) }
-                StatTile(value: droplet.unreadCount, label: "unread SMS", accent: droplet.unreadCount > 0) {
-                    droplet.select(.messages)
+        let live = droplet.homeShowsLive, media = droplet.homeShowsMedia
+        // The page's body less the live (40) and media (60) tiles with their gaps; a row is 33 and a 2 gap. Neither
+        // tile: three rows; one: two rows or one; both: none.
+        let room = GossipDroplet.pageBodyHeight - (live ? 48 : 0) - (media ? 68 : 0)
+        let rows = max(0, Int((room + 2) / 35))
+        return HStack(alignment: .top, spacing: DroppySpacing.sm) {
+            StatusTile(droplet: droplet, notifications: latest.count)
+                .frame(width: 140)
+            VStack(alignment: .leading, spacing: DroppySpacing.sm) {
+                if let first = droplet.liveNotifications.first {
+                    LiveTile(droplet: droplet, notification: first)
+                }
+                if media {
+                    MediaTile(droplet: droplet)
+                }
+                if rows > 0 {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if latest.isEmpty {
+                            Message(text: "Nothing new on the phone").padding(.horizontal, DroppySpacing.xs)
+                        }
+                        ForEach(latest.prefix(rows), id: \.key) { notification in
+                            Button { droplet.open(notification) } label: {
+                                CompactNotificationRow(droplet: droplet, notification: notification)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
             }
-            .frame(height: 62)
-            if let live = droplet.liveNotifications.first {
-                LiveTile(droplet: droplet, notification: live)
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
+    }
+
+    private var compact: some View {
+        let latest = droplet.visibleNotifications.filter { $0.live == nil }
+        let live = droplet.homeShowsLive, media = droplet.homeShowsMedia
+        // The counts line (16), the live line (18) and the player (28), each with a 4 gap; rows as on the wide page.
+        let room = GossipDroplet.pageBodyHeight - 16 - (live ? 22 : 0) - (media ? 32 : 0) - 4
+        let rows = max(0, Int((room + 2) / 35))
+        return VStack(alignment: .leading, spacing: DroppySpacing.xs) {
+            Button { droplet.reveal(.notifications) } label: {
+                HStack(spacing: DroppySpacing.xs) {
+                    CountLabel(value: latest.count, label: "notifications")
+                    Text("·").foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
+                    CountLabel(value: droplet.unreadCount, label: "SMS")
+                }
             }
-            if droplet.currentMedia != nil {
-                MediaTile(droplet: droplet)
+            .buttonStyle(.plain)
+            .frame(height: 16)
+            if let first = droplet.liveNotifications.first {
+                Button { droplet.open(first) } label: { LiveLine(droplet: droplet, notification: first) }
+                    .buttonStyle(.plain)
+                    .frame(height: 18)
+            }
+            if let playing = droplet.currentMedia {
+                HStack(spacing: DroppySpacing.sm) {
+                    MediaArtwork(image: droplet.artwork(for: playing.deviceID), size: 28)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(playing.playing.title).font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                        Text(playing.playing.artist).font(.system(size: 11))
+                            .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+                    }
+                    .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Button { droplet.media(playing.playing.isPlaying ? "pause" : "play") } label: {
+                        Image(systemName: playing.playing.isPlaying ? "pause.fill" : "play.fill")
+                    }
+                    .buttonStyle(DroppyCircleButtonStyle(size: 22))
+                    .accessibilityLabel(playing.playing.isPlaying ? "Pause" : "Play")
+                }
+                .frame(height: 28)
+                .droppyFlatGlassControls()
             }
             if rows > 0 {
                 VStack(alignment: .leading, spacing: 2) {
-                    if rows == 3 {
-                        HStack {
-                            Text("Latest").font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
-                            Spacer(minLength: 0)
-                            if latest.count > 3 {
-                                SeeAllButton(count: latest.count) { droplet.select(.notifications) }
-                            }
-                        }
-                        .padding(.horizontal, DroppySpacing.xs)
-                        .frame(height: 18)
-                    }
-                    if latest.isEmpty {
-                        Message(text: "Nothing new on the phone").padding(.horizontal, DroppySpacing.xs)
-                    }
                     ForEach(latest.prefix(rows), id: \.key) { notification in
                         Button { droplet.open(notification) } label: {
                             CompactNotificationRow(droplet: droplet, notification: notification)
@@ -62,52 +105,7 @@ struct HomePage: View {
                 }
             }
         }
-    }
-
-    private var compact: some View {
-        VStack(alignment: .leading, spacing: DroppySpacing.sm) {
-            Button { droplet.reveal(.notifications) } label: {
-                HStack(spacing: DroppySpacing.xs) {
-                    CountLabel(value: droplet.visibleNotifications.filter { $0.live == nil }.count, label: "notifications")
-                    Text("·").foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
-                    CountLabel(value: droplet.unreadCount, label: "SMS")
-                }
-            }
-            .buttonStyle(.plain)
-            if let live = droplet.liveNotifications.first {
-                Button { droplet.open(live) } label: { LiveLine(droplet: droplet, notification: live) }
-                    .buttonStyle(.plain)
-            }
-            if let media = droplet.currentMedia {
-                HStack(spacing: DroppySpacing.sm) {
-                    MediaArtwork(image: droplet.artwork(for: media.deviceID), size: 28)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(media.playing.title).font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                        Text(media.playing.artist).font(.system(size: 11))
-                            .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                    }
-                    .lineLimit(1)
-                    Spacer(minLength: 0)
-                    Button { droplet.media(media.playing.isPlaying ? "pause" : "play") } label: {
-                        Image(systemName: media.playing.isPlaying ? "pause.fill" : "play.fill")
-                    }
-                    .buttonStyle(DroppyCircleButtonStyle(size: 22))
-                    .accessibilityLabel(media.playing.isPlaying ? "Pause" : "Play")
-                }
-                .droppyFlatGlassControls()
-            }
-            // The narrow card is as tall as the full one: the room left goes to the newest notifications.
-            let latest = droplet.visibleNotifications.filter { $0.live == nil }
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(latest.prefix(2), id: \.key) { notification in
-                    Button { droplet.open(notification) } label: {
-                        CompactNotificationRow(droplet: droplet, notification: notification)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -149,41 +147,46 @@ struct BatteryRing: View {
     }
 }
 
-private struct BatteryTile: View {
-    let battery: GossipDevice.Battery?
+/// Home's left column: the battery, and the counts that lead to the notifications and SMS pages.
+private struct StatusTile: View {
+    @ObservedObject var droplet: GossipDroplet
+    let notifications: Int
 
     var body: some View {
         Tile {
-            HStack(spacing: DroppySpacing.smd) {
-                if let battery {
-                    ZStack {
-                        BatteryRing(level: battery.level, charging: battery.charging, size: 42)
-                        Text("\(battery.level)")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+            VStack(alignment: .leading, spacing: 2) {
+                if let battery = droplet.phone?.battery {
+                    HStack(spacing: DroppySpacing.sm) {
+                        ZStack {
+                            BatteryRing(level: battery.level, charging: battery.charging, size: 40, lineWidth: 4.5)
+                            Text("\(battery.level)")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                        }
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Battery").font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                            Text(battery.charging ? "Charging" : "On battery").font(.system(size: 11))
+                                .foregroundStyle(battery.charging ? Color.green : AdaptiveColors.notchSurfaceTertiaryText)
+                        }
                     }
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Battery").font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                        Label(battery.charging ? "Charging" : "On battery",
-                              systemImage: battery.charging ? "bolt.fill" : "battery.75percent")
-                            .labelStyle(.titleOnly)
-                            .font(.system(size: 11))
-                            .foregroundStyle(battery.charging ? Color.green : AdaptiveColors.notchSurfaceTertiaryText)
-                    }
+                    .accessibilityElement(children: .combine)
                 } else {
                     Text("No battery reading").font(.system(size: 11))
                         .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
                 }
+                Spacer(minLength: 0)
+                CountButton(value: notifications, label: "notifications") { droplet.select(.notifications) }
+                CountButton(value: droplet.unreadCount, label: "unread SMS", accent: droplet.unreadCount > 0) {
+                    droplet.select(.messages)
+                }
             }
         }
-        .fixedSize(horizontal: true, vertical: false)
-        .accessibilityElement(children: .combine)
     }
 }
 
-private struct StatTile: View {
+private struct CountButton: View {
     let value: Int
     let label: String
     var accent = false
@@ -191,20 +194,19 @@ private struct StatTile: View {
 
     var body: some View {
         Button(action: action) {
-            Tile {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: DroppySpacing.xs) {
-                        Text("\(value)")
-                            .font(.system(size: 20, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                        if accent { Circle().fill(Color.accentColor).frame(width: 6, height: 6) }
-                    }
-                    Text(label).font(.system(size: 11))
-                        .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
-                        .lineLimit(1)
-                }
+            HStack(spacing: 4) {
+                Text("\(value)")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                Text(label).font(.system(size: 11))
+                    .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+                    .lineLimit(1)
+                if accent { Circle().fill(Color.accentColor).frame(width: 6, height: 6) }
+                Spacer(minLength: 0)
             }
+            .padding(.vertical, 1)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(value) \(label)")
@@ -234,7 +236,8 @@ private struct LiveTile: View {
             VStack(alignment: .leading, spacing: DroppySpacing.xs) {
                 LiveLine(droplet: droplet, notification: notification)
                 if let live = notification.live, live.fraction != nil || live.indeterminate == true {
-                    LiveProgress(live: live)
+                    // The bar's own height, not the control's, so the tile keeps its 40.
+                    LiveProgress(live: live).frame(height: 6)
                 }
             }
         }
@@ -332,7 +335,7 @@ struct CompactNotificationRow: View {
                 .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
         }
         .padding(.horizontal, DroppySpacing.xs)
-        .padding(.vertical, 3)
+        .padding(.vertical, 2)
         .contentShape(Rectangle())
         .hoverHighlight()
     }

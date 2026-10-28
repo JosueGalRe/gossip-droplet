@@ -173,7 +173,11 @@ struct PhoneWidget: View {
                 case .messages: MessagesPage(droplet: droplet, context: context)
                 }
             }
-            Spacer(minLength: 0)
+            // The page gets exactly what is under the header: a page a few points too tall loses its bottom edge
+            // instead of pushing the header up.
+            .frame(height: max(0, droplet.contentHeight - context.contentInsets.top - context.contentInsets.bottom - 32),
+                   alignment: .top)
+            .clipped()
         }
         .padding(context.contentInsets)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -301,13 +305,13 @@ private struct NotificationsPage: View {
             Message(text: "No notifications")
         } else {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(list.prefix(4), id: \.key) { notification in
+                ForEach(list.prefix(3), id: \.key) { notification in
                     Button { droplet.open(notification) } label: {
                         CompactNotificationRow(droplet: droplet, notification: notification)
                     }
                     .buttonStyle(.plain)
                 }
-                if list.count > 4 {
+                if list.count > 3 {
                     SeeAllButton(count: list.count) { droplet.reveal(.notifications) }
                         .padding(.horizontal, DroppySpacing.xs)
                         .padding(.top, 2)

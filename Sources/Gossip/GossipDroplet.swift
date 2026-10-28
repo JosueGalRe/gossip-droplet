@@ -37,13 +37,19 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     @Published private(set) var page: Page = .home
 
-    /// One height for every page, so switching pages never resizes the shelf; each page fills it. Home with both a
-    /// live tile and the music is what needs it. A focused notification is the exception: it grows to show all of it.
-    static let pageHeight: CGFloat = 236
+    /// One height for every page, the height of the shelf's other tall widgets (OpenChamber's), so switching pages
+    /// never resizes the shelf and the phone never stretches its neighbours. A focused notification and an open
+    /// conversation are the exceptions: they grow to show what they hold.
+    static let pageHeight: CGFloat = 176
+    /// What a page has under the header: the height less the insets (16), the header (24) and the gap under it (8).
+    static let pageBodyHeight: CGFloat = pageHeight - 48
+    static let conversationHeight: CGFloat = 280
 
     var contentHeight: CGFloat {
-        guard page == .notifications, let focused = focusedNotification else { return Self.pageHeight }
-        return FocusedNotification.height(for: focused, picture: picture(for: focused))
+        if page == .notifications, let focused = focusedNotification {
+            return max(Self.pageHeight, FocusedNotification.height(for: focused, picture: picture(for: focused)))
+        }
+        return page == .messages && openThreadID != nil ? Self.conversationHeight : Self.pageHeight
     }
 
     var homeShowsLive: Bool { !liveNotifications.isEmpty }
@@ -259,8 +265,11 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     func select(_ page: Page) {
         guard page != self.page else { return }
         if focusedKey != nil { unfocus() }
+        let height = contentHeight
         self.page = page
         host?.preferences.setValue(page, forKey: "page")
+        // Away from or back to an open conversation.
+        if contentHeight != height { host?.shelf.invalidateLayout(for: Self.widgetID) }
     }
 
     /// Opens the shelf on one page of the widget, alone, so it shows its full composition.
@@ -444,9 +453,11 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     var unreadCount: Int { threads.reduce(0) { $0 + $1.unread } }
 
     func openThread(_ thread: MessageThread?) {
+        let height = contentHeight
         openThreadID = thread?.id
         conversation = []
         composeText = ""
+        if contentHeight != height { host?.shelf.invalidateLayout(for: Self.widgetID) }
         guard let thread else { return }
         client?.send(["type": "messages.thread", "threadId": thread.id])
         host?.shelf.requestKeyboardFocus()
