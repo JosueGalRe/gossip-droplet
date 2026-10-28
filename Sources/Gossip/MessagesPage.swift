@@ -42,7 +42,7 @@ struct MessagesPage: View {
             Message(text: droplet.messagesLoading ? "Loading conversations…" : "No conversations")
         } else {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(droplet.threads.prefix(3)) { thread in
+                ForEach(droplet.threads.prefix(4)) { thread in
                     Button { droplet.open(thread) } label: {
                         HStack(spacing: DroppySpacing.sm) {
                             VStack(alignment: .leading, spacing: 0) {
@@ -64,7 +64,7 @@ struct MessagesPage: View {
                     }
                     .buttonStyle(.plain)
                 }
-                if droplet.threads.count > 3 {
+                if droplet.threads.count > 4 {
                     SeeAllButton(count: droplet.threads.count) { droplet.reveal(.messages) }
                         .padding(.top, DroppySpacing.xs)
                 }

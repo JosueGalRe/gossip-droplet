@@ -37,22 +37,12 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     @Published private(set) var page: Page = .home
 
-    /// The page's height, so the shelf is only as tall as the page showing. Home grows a tile for something in progress
-    /// and one for what is playing, and shows the latest notification when it has neither.
-    var contentHeight: CGFloat {
-        switch page {
-        case .home:
-            let tiles = (homeShowsLive ? 1 : 0) + (homeShowsMedia ? 1 : 0)
-            return 16 + 24 + 8 + 62 + (tiles == 0 ? 8 + 44 : CGFloat(tiles) * 8 + (homeShowsLive ? 46 : 0) + (homeShowsMedia ? 70 : 0))
-        case .notifications: return 196
-        case .messages: return 280
-        }
-    }
+    /// One height for every page, so switching pages never resizes the shelf; each page fills it. Home with both a
+    /// live tile and the music is what needs it.
+    static let contentHeight: CGFloat = 236
 
     var homeShowsLive: Bool { !liveNotifications.isEmpty }
     var homeShowsMedia: Bool { currentMedia != nil }
-    /// What home's height was last measured for, so the shelf is re-measured only when a tile comes or goes.
-    private var measuredHome: (live: Bool, media: Bool) = (false, false)
     @Published private(set) var isConnected = false
     @Published private(set) var devices: [GossipDevice] = []
     @Published private(set) var ringing: Set<String> = []
@@ -247,7 +237,6 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         guard page != self.page else { return }
         self.page = page
         host?.preferences.setValue(page, forKey: "page")
-        host?.shelf.invalidateLayout(for: Self.widgetID)
     }
 
     /// Opens the shelf on one page of the widget, alone, so it shows its full composition.
@@ -268,13 +257,6 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         openThread(thread)
     }
 
-    /// Home's tiles come and go with what is in progress and what is playing; re-measure the shelf when they do.
-    private func homeCompositionChanged() {
-        let now = (homeShowsLive, homeShowsMedia)
-        guard now != measuredHome else { return }
-        measuredHome = now
-        if page == .home { host?.shelf.invalidateLayout(for: Self.widgetID) }
-    }
 
     // MARK: Phone
 
@@ -670,7 +652,6 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     }
 
     private func publishActivity() {
-        homeCompositionChanged()
         switch activityFocus {
         case .live(let notification):
             activitySubject.send(LiveActivityState(
@@ -750,6 +731,11 @@ extension GossipDroplet {
         }
         droplet.nowPlaying = ["pixel": NowPlaying(title: "Midnight City", artist: "M83", isPlaying: true, positionMs: 60_000,
                                                   durationMs: 243_000, packageName: "com.spotify.music", artworkBase64: nil)]
+        if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_QUIET"] != nil {
+            // Nothing in progress and nothing playing: home fills with the latest notifications.
+            droplet.notifications.removeAll { $0.live != nil }
+            droplet.nowPlaying = [:]
+        }
         let today = Date().timeIntervalSince1970
         droplet.threads = [
             MessageThread(id: "t1", phoneId: "pixel", title: "Ana", address: "+50370000001", snippet: "¿Llegas a las 7?",
@@ -775,7 +761,7 @@ extension GossipDroplet: ShelfWidgetProviding {
                 title: "Phone",
                 systemImage: "iphone",
                 layoutTraits: ShelfWidgetLayoutTraits(preferredSoloWidth: 420, preferredPairedWidth: 220,
-                                                      contentHeight: .fixed(contentHeight)),
+                                                      contentHeight: .fixed(Self.contentHeight)),
                 focusPolicy: .keyboardFocusable,
                 searchKeywords: ["gossip", "android", "notifications", "battery", "sms", "messages", "music"]
             ),

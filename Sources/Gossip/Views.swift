@@ -302,13 +302,13 @@ private struct NotificationsPage: View {
             Message(text: "No notifications")
         } else {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(list.prefix(3), id: \.key) { notification in
+                ForEach(list.prefix(4), id: \.key) { notification in
                     Button { droplet.open(notification) } label: {
                         CompactNotificationRow(droplet: droplet, notification: notification)
                     }
                     .buttonStyle(.plain)
                 }
-                if list.count > 3 {
+                if list.count > 4 {
                     SeeAllButton(count: list.count) { droplet.reveal(.notifications) }
                         .padding(.top, DroppySpacing.xs)
                 }

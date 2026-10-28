@@ -17,12 +17,14 @@ struct HomePage: View {
     }
 
     private var full: some View {
-        VStack(alignment: .leading, spacing: DroppySpacing.sm) {
+        // The page is a fixed height: what is in progress and what is playing take their tiles, and the newest
+        // notifications fill the room left (three with neither, under a See all).
+        let latest = droplet.visibleNotifications.filter { $0.live == nil }
+        let rows = max(0, 3 - (droplet.homeShowsLive ? 1 : 0) - (droplet.homeShowsMedia ? 2 : 0))
+        return VStack(alignment: .leading, spacing: DroppySpacing.sm) {
             HStack(spacing: DroppySpacing.sm) {
                 BatteryTile(battery: droplet.phone?.battery)
-                StatTile(value: droplet.visibleNotifications.filter { $0.live == nil }.count, label: "notifications") {
-                    droplet.select(.notifications)
-                }
+                StatTile(value: latest.count, label: "notifications") { droplet.select(.notifications) }
                 StatTile(value: droplet.unreadCount, label: "unread SMS", accent: droplet.unreadCount > 0) {
                     droplet.select(.messages)
                 }
@@ -34,8 +36,38 @@ struct HomePage: View {
             if droplet.currentMedia != nil {
                 MediaTile(droplet: droplet)
             }
-            if !droplet.homeShowsLive && !droplet.homeShowsMedia {
-                LatestNotification(droplet: droplet)
+            if rows > 0 {
+                VStack(alignment: .leading, spacing: 2) {
+                    if rows == 3 {
+                        HStack {
+                            Text("Latest").font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
+                            Spacer(minLength: 0)
+                            if latest.count > 3 {
+                                Button { droplet.select(.notifications) } label: {
+                                    HStack(spacing: 2) {
+                                        Text("See all \(latest.count)")
+                                        Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
+                                    }
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, DroppySpacing.xs)
+                        .frame(height: 18)
+                    }
+                    if latest.isEmpty {
+                        Message(text: "Nothing new on the phone").padding(.horizontal, DroppySpacing.xs)
+                    }
+                    ForEach(latest.prefix(rows), id: \.key) { notification in
+                        Button { droplet.open(notification) } label: {
+                            CompactNotificationRow(droplet: droplet, notification: notification)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
         }
     }
@@ -91,12 +123,13 @@ struct HomePage: View {
 
 /// A raised tile: the one place a widget may use a fill, for something that reads as its own thing.
 struct Tile<Content: View>: View {
+    var verticalPadding: CGFloat = DroppySpacing.sm
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         content()
             .padding(.horizontal, DroppySpacing.smd)
-            .padding(.vertical, DroppySpacing.sm)
+            .padding(.vertical, verticalPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .background(AdaptiveColors.notchSurfaceCardFill, in: RoundedRectangle(cornerRadius: DroppyRadius.medium, style: .continuous))
     }
@@ -205,7 +238,7 @@ private struct LiveTile: View {
     let notification: PhoneNotification
 
     var body: some View {
-        Tile {
+        Tile(verticalPadding: DroppySpacing.xsm) {
             VStack(alignment: .leading, spacing: DroppySpacing.xs) {
                 LiveLine(droplet: droplet, notification: notification)
                 if let live = notification.live, live.fraction != nil || live.indeterminate == true {
@@ -213,7 +246,7 @@ private struct LiveTile: View {
                 }
             }
         }
-        .frame(height: 46)
+        .frame(height: 40)
         .onTapGesture { droplet.open(notification) }
     }
 }
@@ -241,10 +274,10 @@ private struct MediaTile: View {
 
     var body: some View {
         if let media = droplet.currentMedia {
-            Tile {
-                VStack(alignment: .leading, spacing: DroppySpacing.xs) {
+            Tile(verticalPadding: DroppySpacing.xsm) {
+                VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: DroppySpacing.sm) {
-                        MediaArtwork(image: droplet.artwork(for: media.deviceID), size: 32)
+                        MediaArtwork(image: droplet.artwork(for: media.deviceID), size: 28)
                         VStack(alignment: .leading, spacing: 0) {
                             Text(media.playing.title).font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
@@ -276,31 +309,11 @@ private struct MediaTile: View {
                         Button { droplet.volume(up: true) } label: { Image(systemName: "speaker.wave.2.fill") }
                             .accessibilityLabel("Volume up")
                     }
-                    .buttonStyle(DroppyCircleButtonStyle(size: 18))
+                    .buttonStyle(DroppyCircleButtonStyle(size: 16))
                 }
             }
-            .frame(height: 70)
+            .frame(height: 60)
             .droppyFlatGlassControls()
-        }
-    }
-}
-
-/// Home with nothing in progress and nothing playing: the newest notification, and the way to the rest.
-private struct LatestNotification: View {
-    @ObservedObject var droplet: GossipDroplet
-
-    var body: some View {
-        let rest = droplet.visibleNotifications.filter { $0.live == nil }
-        if let latest = rest.first {
-            HStack(spacing: DroppySpacing.sm) {
-                Button { droplet.open(latest) } label: { CompactNotificationRow(droplet: droplet, notification: latest) }
-                    .buttonStyle(.plain)
-                SeeAllButton(count: rest.count) { droplet.select(.notifications) }
-            }
-            .frame(height: 44)
-        } else {
-            Message(text: "Nothing new on the phone")
-                .frame(height: 44)
         }
     }
 }
