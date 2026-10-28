@@ -66,7 +66,6 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     /// Decoded icons, avatars and pictures, by notification key and kind.
     private var images: [String: [String: NSImage]] = [:]
     private var artwork: [String: NSImage] = [:]
-    private var hudKey: String?
     /// When each device's now-playing state arrived, to advance its position while it plays.
     private var mediaReceivedAt: [String: Date] = [:]
     private var batteryLatches: [String: LowBatteryLatch] = [:]
@@ -93,7 +92,10 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             // So the harness's surfaces have something to draw.
             publishActivity()
             publishLockScreen()
-            if let first = notifications.first { announce(first) }
+            if let first = notifications.first {
+                announce(first)
+                if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_HUD_OPEN"] != nil { toggleHUDExpanded() }
+            }
             return
         }
         let client = BridgeClient()
@@ -106,7 +108,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     public func deactivate() {
         client?.stop()
         client = nil
-        if hudKey != nil { host?.hud.dismiss(id: Self.notificationHUDID) }
+        if hudNotification != nil { host?.hud.dismiss(id: Self.notificationHUDID) }
         activitySubject.send(nil)
         lockScreenSubject.send(nil)
         host = nil
@@ -181,8 +183,10 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             } else if previous == nil || previous?.title != posted.title || previous?.body != posted.body {
                 // An update that only adds suggestions or changes nothing visible is not news.
                 announce(posted)
-            } else if hudKey == posted.key {
-                announce(posted)
+            } else if hudNotification?.key == posted.key {
+                // Same text, new suggestions or buttons: refresh the card in place without announcing again.
+                hudNotification = posted
+                presentNotificationHUD()
             }
         case "notification.removed":
             guard let removed = try? decoder.decode(Removed.self, from: line) else { return }
@@ -191,10 +195,8 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             images[key] = nil
             if replyingTo == key { replyingTo = nil }
             if expandedKey == key { expandedKey = nil }
-            if hudKey == key {
-                hudKey = nil
-                host?.hud.dismiss(id: Self.notificationHUDID)
-            }
+            // Gone from the phone (read or dismissed there): the card goes too, held or not.
+            if hudNotification?.key == key { closeHUD() }
             if callHUDKey == key {
                 callHUDKey = nil
                 host?.hud.dismiss(id: Self.callHUDID)
@@ -318,8 +320,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     }
 
     func revealNotifications() {
-        host?.hud.dismiss(id: Self.notificationHUDID)
-        hudKey = nil
+        closeHUD()
         reveal(.notifications)
     }
 
@@ -337,16 +338,14 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     func perform(_ action: NotificationAction, on notification: PhoneNotification) {
         client?.send(["type": "action", "deviceId": notification.deviceId, "id": notification.id, "index": action.index])
         host?.feedback.play(.success)
+        if hudNotification?.key == notification.key { closeHUD() }
     }
 
     /// Sends a suggested reply as it is.
     func quickReply(_ text: String, to notification: PhoneNotification) {
         client?.send(["type": "reply", "deviceId": notification.deviceId, "id": notification.id, "text": text])
         host?.feedback.play(.success)
-        if hudKey == notification.key {
-            hudKey = nil
-            host?.hud.dismiss(id: Self.notificationHUDID)
-        }
+        if hudNotification?.key == notification.key { closeHUD() }
     }
 
     func copyCode(_ code: String) {
@@ -494,14 +493,47 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     // MARK: HUD
 
+    /// The notification on the card in the notch, and whether the user holds it there: clicked open, or under the
+    /// pointer. A held card is never replaced by a newer notification; those go to the widget and are counted on it.
+    private var hudNotification: PhoneNotification?
+    @Published private(set) var hudExpanded = false
+    @Published private(set) var hudHovered = false
+    @Published private(set) var arrivedWhileHeld = 0
+    /// When the hold last changed. The host can take the card away (another surface claims the notch) without the
+    /// hover ever ending, so a hold this old no longer holds back announcements.
+    private var heldSince = Date.distantPast
+
+    private var hudHeld: Bool {
+        guard hudNotification != nil, hudExpanded || hudHovered else { return false }
+        return Date().timeIntervalSince(heldSince) < (hudExpanded ? 30 * 60 : 2 * 60)
+    }
+
     private func announce(_ notification: PhoneNotification) {
-        guard let host, showsNotifications, announcesNotifications, announcementsPausedUntil == nil,
+        guard host != nil, showsNotifications, announcesNotifications, announcementsPausedUntil == nil,
               !isMuted(notification.appPackage), !isHidden(notification.appPackage) else { return }
-        hudKey = notification.key
+        if hudHeld, hudNotification?.key != notification.key {
+            arrivedWhileHeld += 1
+            return
+        }
+        if hudNotification?.key != notification.key {
+            hudExpanded = false
+            hudHovered = false
+            arrivedWhileHeld = 0
+        }
+        hudNotification = notification
+        presentNotificationHUD()
+    }
+
+    /// Presents, or updates in place, the card for the current notification in its current shape: compact with a
+    /// timer, or open (clicked, or under the pointer) until closed.
+    private func presentNotificationHUD(timer: TimeInterval? = nil) {
+        guard let host, let notification = hudNotification else { return }
+        let expanded = hudExpanded
         let layout = NotificationCard.layout(for: notification, geometry: host.environment.notchGeometry,
-                                             hasPicture: picture(for: notification) != nil)
+                                             picture: picture(for: notification), expanded: expanded)
         // A longer message stays up a little longer: a second more per line past two, at most six.
-        let duration = hudDuration + Double(min(6, max(0, layout.bodyLines - 2)))
+        let duration: TimeInterval? = expanded || hudHovered
+            ? nil : timer ?? hudDuration + Double(min(6, max(0, layout.measuredLines - 2)))
         let presented = host.hud.present(DropletHUDRequest(
             id: Self.notificationHUDID, duration: duration,
             accessibilityLabel: "\(notification.appName): \(notification.headline)",
@@ -509,9 +541,40 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         ) { [weak self] in
             if let self { NotificationStrip(droplet: self, notification: notification) }
         } expanded: { [weak self] in
-            if let self { NotificationCard(droplet: self, notification: notification, bodyLines: layout.bodyLines) }
+            if let self { NotificationCard(droplet: self, notification: notification, layout: layout, expanded: expanded) }
         })
-        if !presented { hudKey = nil }
+        if !presented { clearHUD() }
+    }
+
+    /// A click on the card opens it (all the text, the picture large, every button) and keeps it until closed; a click
+    /// on the open card folds it back with a few seconds left.
+    func toggleHUDExpanded() {
+        guard hudNotification != nil else { return }
+        hudExpanded.toggle()
+        heldSince = Date()
+        if !hudExpanded { arrivedWhileHeld = 0 }
+        presentNotificationHUD(timer: 4)
+    }
+
+    /// Under the pointer the card does not time out; leaving gives it a few more seconds.
+    func hudHover(_ inside: Bool) {
+        guard hudNotification != nil, hudHovered != inside else { return }
+        hudHovered = inside
+        heldSince = Date()
+        if !hudExpanded { presentNotificationHUD(timer: 3) }
+    }
+
+    /// Takes the card down and leaves the notification on the phone.
+    func closeHUD() {
+        if hudNotification != nil { host?.hud.dismiss(id: Self.notificationHUDID) }
+        clearHUD()
+    }
+
+    private func clearHUD() {
+        hudNotification = nil
+        hudExpanded = false
+        hudHovered = false
+        arrivedWhileHeld = 0
     }
 
     static let callHUDID = "gossip.call"

@@ -20,38 +20,55 @@ struct NotificationStrip: View {
     }
 }
 
-/// The card: who wrote and what with its picture, reply and dismiss at hand, then a row of what can be done without
-/// opening anything: copy a code, a suggested reply, the app's own buttons.
+/// The card: who wrote and what, with reply and dismiss at hand, then a row of what can be done in a click (copy a code,
+/// a suggested reply, the app's own buttons). Compact it shows three lines and times out; a click opens it with all the
+/// text, the picture large and every button, and it stays until closed.
 struct NotificationCard: View {
     @ObservedObject var droplet: GossipDroplet
     let notification: PhoneNotification
-    /// How many lines the body gets, measured by [layout] so the whole message shows when it fits.
-    var bodyLines = 2
+    let layout: Layout
+    let expanded: Bool
 
     struct Layout {
+        /// Lines the body shows, and the lines it needs at this width.
         let bodyLines: Int
+        let measuredLines: Int
+        /// Open and longer than [maxExpandedLines]: the body scrolls.
+        let scrolls: Bool
+        let pictureHeight: CGFloat
         let height: CGFloat
     }
 
-    static let maxBodyLines = 8
+    static let maxCompactLines = 3
+    static let maxExpandedLines = 12
     private static let bodyFont = NSFont.systemFont(ofSize: 12)
+    static var lineHeight: CGFloat { ceil(bodyFont.ascender - bodyFont.descender + bodyFont.leading) }
 
     /// Measures the body at the card's real text width (the card is the notch's width plus 120 a side, less its 48pt
-    /// insets; the island's is narrower) and asks for the height that shows it whole, up to [maxBodyLines] lines,
-    /// plus a row when there is something to do in a click.
-    static func layout(for notification: PhoneNotification, geometry: DropletNotchGeometry, hasPicture: Bool) -> Layout {
+    /// insets; the island's is narrower) and asks for the height that shows what this shape shows, plus the picture
+    /// when open and a row when there is something to do in a click.
+    static func layout(for notification: PhoneNotification, geometry: DropletNotchGeometry, picture: NSImage?,
+                       expanded: Bool) -> Layout {
         let contentWidth = geometry.isHardwareNotch ? geometry.closedWidth + 144 : 208
-        let textWidth = max(120, contentWidth - 28 - 8 - 52 - 8 - (hasPicture ? 48 : 0))
-        let lineHeight = ceil(bodyFont.ascender - bodyFont.descender + bodyFont.leading)
+        let buttons: CGFloat = expanded ? 80 : 52
+        let textWidth = max(120, contentWidth - 36 - buttons - 8 - (!expanded && picture != nil ? 48 : 0))
         let measured = (notification.body as NSString).boundingRect(
             with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: bodyFont]
         )
-        let lines = min(maxBodyLines, max(1, Int(ceil(measured.height / lineHeight))))
-        let textHeight = 17 + 2 + CGFloat(lines) * lineHeight
-        let height = max(28, textHeight) + (QuickActions.hasAny(notification) ? 8 + 28 : 0)
-        return Layout(bodyLines: lines, height: ceil(height))
+        let measuredLines = max(1, Int(ceil(measured.height / lineHeight)))
+        let maxLines = expanded ? maxExpandedLines : maxCompactLines
+        let bodyLines = min(maxLines, measuredLines)
+        var height = max(28, 17 + 2 + CGFloat(bodyLines) * lineHeight)
+        var pictureHeight: CGFloat = 0
+        if expanded, let picture, picture.size.width > 0 {
+            pictureHeight = min(160, (contentWidth - 36) * picture.size.height / picture.size.width)
+            height += 8 + pictureHeight
+        }
+        if QuickActions.hasAny(notification) { height += 8 + 28 }
+        return Layout(bodyLines: bodyLines, measuredLines: measuredLines, scrolls: expanded && measuredLines > maxLines,
+                      pictureHeight: pictureHeight, height: ceil(height))
     }
 
     var body: some View {
@@ -59,20 +76,25 @@ struct NotificationCard: View {
             HStack(alignment: .top, spacing: DroppySpacing.sm) {
                 SenderAvatar(droplet: droplet, notification: notification, size: 28)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(notification.headline)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                        .lineLimit(1)
-                    // A link is one long word: break it by character instead of losing the second line.
-                    Text(notification.body)
-                        .font(.system(size: 12))
-                        .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                        .lineLimit(bodyLines)
-                        .truncationMode(.tail)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: DroppySpacing.xs) {
+                        Text(notification.headline)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                            .lineLimit(1)
+                        if droplet.arrivedWhileHeld > 0 {
+                            Text("\(droplet.arrivedWhileHeld) new")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(AdaptiveColors.notchSurfaceCardFill, in: Capsule())
+                                .help("Arrived while this one was open; they are in the shelf")
+                        }
+                    }
+                    bodyText
                 }
-                if let picture = droplet.picture(for: notification) {
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if !expanded, let picture = droplet.picture(for: notification) {
                     Image(nsImage: picture).resizable().aspectRatio(contentMode: .fill)
                         .frame(width: 40, height: 40)
                         .clipShape(RoundedRectangle(cornerRadius: DroppyRadius.small, style: .continuous))
@@ -81,23 +103,57 @@ struct NotificationCard: View {
                     Button {
                         droplet.revealNotifications()
                         if notification.hasReply { droplet.startReply(to: notification) }
-                    } label: { Image(systemName: notification.hasReply ? "arrowshape.turn.up.left" : "chevron.down") }
+                    } label: { Image(systemName: notification.hasReply ? "arrowshape.turn.up.left" : "tray") }
                         .help(notification.hasReply ? "Reply" : "Show in the shelf")
-                        .accessibilityLabel(notification.hasReply ? "Reply" : "Show")
+                        .accessibilityLabel(notification.hasReply ? "Reply" : "Show in the shelf")
+                    if expanded {
+                        Button { droplet.closeHUD() } label: { Image(systemName: "chevron.up") }
+                            .help("Close (keeps it on the phone)")
+                            .accessibilityLabel("Close")
+                    }
                     Button { droplet.dismiss(notification) } label: { Image(systemName: "xmark") }
                         .help("Dismiss on phone")
-                        .accessibilityLabel("Dismiss")
+                        .accessibilityLabel("Dismiss on phone")
                 }
                 .buttonStyle(DroppyCircleButtonStyle(size: 24))
             }
+            if expanded, layout.pictureHeight > 0, let picture = droplet.picture(for: notification) {
+                Image(nsImage: picture).resizable().aspectRatio(contentMode: .fit)
+                    .frame(height: layout.pictureHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: DroppyRadius.small, style: .continuous))
+                    .padding(.leading, 36)
+            }
             if QuickActions.hasAny(notification) {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    QuickActions(droplet: droplet, notification: notification, limit: 3)
+                    QuickActions(droplet: droplet, notification: notification, limit: expanded ? 8 : 3)
                 }
             }
         }
         .droppyFlatGlassControls()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .contentShape(Rectangle())
+        .onTapGesture { droplet.toggleHUDExpanded() }
+        .onHover { droplet.hudHover($0) }
+        .accessibilityAction(named: expanded ? "Fold" : "Open") { droplet.toggleHUDExpanded() }
+    }
+
+    /// Long messages scroll once open; links (one long word) break by character instead of losing their line.
+    @ViewBuilder private var bodyText: some View {
+        let text = Text(notification.body)
+            .font(.system(size: 12))
+            .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+        if layout.scrolls {
+            ScrollView(.vertical, showsIndicators: true) {
+                text.fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: CGFloat(layout.bodyLines) * Self.lineHeight)
+        } else {
+            text.lineLimit(layout.bodyLines)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
