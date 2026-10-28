@@ -179,3 +179,18 @@ struct PhoneApp: Decodable, Equatable, Identifiable {
 
     var id: String { package }
 }
+
+/// A file on its way to or from a paired device, as Gossip reports it.
+struct FileTransfer: Decodable, Equatable, Identifiable {
+    let id: String
+    let deviceId: String
+    let name: String
+    let size: Int64
+    let done: Int64
+    let outgoing: Bool
+    /// `waiting`, `active`, `done`, `failed` or `cancelled`.
+    let state: String
+
+    var isActive: Bool { state == "waiting" || state == "active" }
+    var fraction: Double { size > 0 ? min(1, Double(done) / Double(size)) : 1 }
+}

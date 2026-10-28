@@ -236,6 +236,10 @@ struct ActivityLeading: View {
         switch droplet.activityFocus {
         case .live(let notification):
             SenderAvatar(droplet: droplet, notification: notification, size: DroppyLiveActivityMetrics.iconSize + 5)
+        case .transfer(let transfer):
+            Image(systemName: transfer.outgoing ? "arrow.up.doc.fill" : "arrow.down.doc.fill")
+                .font(.system(size: DroppyLiveActivityMetrics.iconSize, weight: .medium))
+                .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
         case .media(let deviceID, _):
             MediaArtwork(image: droplet.artwork(for: deviceID), size: DroppyLiveActivityMetrics.iconSize + 5)
         case nil:
@@ -253,19 +257,15 @@ struct ActivityTrailing: View {
             switch droplet.activityFocus {
             case .live(let notification):
                 if let fraction = notification.live?.fraction {
-                    ZStack {
-                        Circle().stroke(AdaptiveColors.notchSurfaceCardFill, lineWidth: DroppyLiveActivityMetrics.progressRingLineWidth)
-                        Circle().trim(from: 0, to: fraction)
-                            .stroke(Color.green, style: StrokeStyle(lineWidth: DroppyLiveActivityMetrics.progressRingLineWidth, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                    }
-                    .frame(width: DroppyLiveActivityMetrics.progressRingSize, height: DroppyLiveActivityMetrics.progressRingSize)
+                    ProgressRing(fraction: fraction)
                 } else if notification.live?.chronometerDate != nil {
                     LiveTime(live: notification.live)
                 } else {
                     Image(systemName: notification.live?.isCall == true ? "phone.fill" : "dot.radiowaves.left.and.right")
                         .foregroundStyle(notification.live?.isCall == true ? Color.green : AdaptiveColors.notchSurfacePrimaryText)
                 }
+            case .transfer(let transfer):
+                ProgressRing(fraction: transfer.fraction)
             case .media:
                 Image(systemName: "waveform")
                     .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
@@ -274,6 +274,20 @@ struct ActivityTrailing: View {
             }
         }
         .font(.system(size: DroppyLiveActivityMetrics.iconSize, weight: .medium))
+    }
+}
+
+private struct ProgressRing: View {
+    let fraction: Double
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(AdaptiveColors.notchSurfaceCardFill, lineWidth: DroppyLiveActivityMetrics.progressRingLineWidth)
+            Circle().trim(from: 0, to: fraction)
+                .stroke(Color.green, style: StrokeStyle(lineWidth: DroppyLiveActivityMetrics.progressRingLineWidth, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: DroppyLiveActivityMetrics.progressRingSize, height: DroppyLiveActivityMetrics.progressRingSize)
     }
 }
 
@@ -339,5 +353,51 @@ struct NoticeCard: View {
         }
         .padding(DroppySpacing.sm)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A file the phone sent: its picture or icon (drag it anywhere), its name, and Open and Show in Finder.
+struct ReceivedFileCard: View {
+    @ObservedObject var droplet: GossipDroplet
+    let url: URL
+    let from: String
+
+    static let height: CGFloat = 16 + 52
+
+    private var preview: NSImage {
+        let isImage = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.conforms(to: .image)) == true
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? .max
+        if isImage, size < 20 << 20, let image = NSImage(contentsOf: url) { return image }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
+
+    var body: some View {
+        HStack(spacing: DroppySpacing.smd) {
+            Image(nsImage: preview).resizable().aspectRatio(contentMode: .fill)
+                .frame(width: 52, height: 52)
+                .clipShape(RoundedRectangle(cornerRadius: DroppyRadius.small, style: .continuous))
+                .onDrag { NSItemProvider(contentsOf: url) ?? NSItemProvider() }
+                .help("Drag to use it")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(url.lastPathComponent)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text("From \(from) · in Downloads")
+                    .font(.system(size: 11))
+                    .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
+                    .lineLimit(1)
+                HStack(spacing: DroppySpacing.xs) {
+                    Button("Open") { droplet.open(url) }
+                    Button("Show in Finder") { droplet.revealInFinder(url) }
+                }
+                .buttonStyle(DroppyQuietButtonStyle(size: .small))
+                .padding(.top, 2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(DroppySpacing.sm)
+        .droppyFlatGlassControls()
     }
 }
