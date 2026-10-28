@@ -375,7 +375,8 @@ private struct NotificationRow: View {
                     Text(notification.body)
                         .font(.system(size: 11))
                         .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                        .lineLimit(expanded ? 4 : 1)
+                        .lineLimit(expanded ? nil : 1)
+                        .fixedSize(horizontal: false, vertical: expanded)
                 }
                 .lineLimit(1)
                 Spacer(minLength: 0)

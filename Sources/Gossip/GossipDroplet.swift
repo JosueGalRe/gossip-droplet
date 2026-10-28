@@ -498,14 +498,18 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         guard let host, showsNotifications, announcesNotifications, announcementsPausedUntil == nil,
               !isMuted(notification.appPackage), !isHidden(notification.appPackage) else { return }
         hudKey = notification.key
+        let layout = NotificationCard.layout(for: notification, geometry: host.environment.notchGeometry,
+                                             hasPicture: picture(for: notification) != nil)
+        // A longer message stays up a little longer: a second more per line past two, at most six.
+        let duration = hudDuration + Double(min(6, max(0, layout.bodyLines - 2)))
         let presented = host.hud.present(DropletHUDRequest(
-            id: Self.notificationHUDID, duration: hudDuration,
+            id: Self.notificationHUDID, duration: duration,
             accessibilityLabel: "\(notification.appName): \(notification.headline)",
-            isExpanded: true, expandedContentHeight: NotificationCard.height(for: notification)
+            isExpanded: true, expandedContentHeight: layout.height
         ) { [weak self] in
             if let self { NotificationStrip(droplet: self, notification: notification) }
         } expanded: { [weak self] in
-            if let self { NotificationCard(droplet: self, notification: notification) }
+            if let self { NotificationCard(droplet: self, notification: notification, bodyLines: layout.bodyLines) }
         })
         if !presented { hudKey = nil }
     }
@@ -614,7 +618,13 @@ extension GossipDroplet {
         droplet.isConnected = true
         // `GOSSIP_SAMPLE_PAGE=messages droppykit run …` shoots another page.
         droplet.page = ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_PAGE"].flatMap(Page.init(rawValue:)) ?? .notifications
-        let hudFirst = ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_HUD"] == "link"
+        let sampleHUD = ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_HUD"]
+        let hudFirst = sampleHUD == "link" || sampleHUD == "long"
+        let sampleBody = sampleHUD == "long"
+            ? "Oigan, para el sábado: llego a las 3 con las sillas y el proyector. Alguien puede llevar el HDMI largo? "
+                + "Diego dijo que traía las bocinas pero no confirmó. Si no, uso las mías. También falta definir quién "
+                + "trae comida, yo puedo pasar por pupusas de camino si me dicen cuántas."
+            : "🔗 Bill Fanter on Instagram (www.instagram.com/reel/DQx4abcdEfGhIjk/?igsh=MTRmZ2x0)"
         droplet.devices = [GossipDevice(id: "pixel", name: "Pixel 9 Pro XL", type: "androidPhone", online: true,
                                         battery: .init(level: 64, charging: false))]
         let now = Int64(Date().timeIntervalSince1970 * 1000)
@@ -640,7 +650,7 @@ extension GossipDroplet {
         if hudFirst {
             droplet.notifications.insert(PhoneNotification(
                 deviceId: "pixel", id: "6", appPackage: "com.whatsapp", appName: "WhatsApp", title: "Grupo del viernes: Diego Hernández",
-                body: "🔗 Bill Fanter on Instagram (www.instagram.com/reel/DQx4abcdEfGhIjk/?igsh=MTRmZ2x0)", iconBase64: nil,
+                body: sampleBody, iconBase64: nil,
                 hasReply: true, timestamp: now, replay: nil, actions: [NotificationAction(index: 1, title: "Mark as read"),
                                                                      NotificationAction(index: 2, title: "Mute")]), at: 0)
         }

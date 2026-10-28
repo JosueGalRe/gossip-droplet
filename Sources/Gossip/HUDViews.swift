@@ -1,3 +1,4 @@
+import AppKit
 import DroppyKit
 import SwiftUI
 
@@ -24,10 +25,33 @@ struct NotificationStrip: View {
 struct NotificationCard: View {
     @ObservedObject var droplet: GossipDroplet
     let notification: PhoneNotification
+    /// How many lines the body gets, measured by [layout] so the whole message shows when it fits.
+    var bodyLines = 2
 
-    /// The card's content height: one more row when there is something to do in a click.
-    static func height(for notification: PhoneNotification) -> CGFloat {
-        QuickActions.hasAny(notification) ? 76 : 44
+    struct Layout {
+        let bodyLines: Int
+        let height: CGFloat
+    }
+
+    static let maxBodyLines = 8
+    private static let bodyFont = NSFont.systemFont(ofSize: 12)
+
+    /// Measures the body at the card's real text width (the card is the notch's width plus 120 a side, less its 48pt
+    /// insets; the island's is narrower) and asks for the height that shows it whole, up to [maxBodyLines] lines,
+    /// plus a row when there is something to do in a click.
+    static func layout(for notification: PhoneNotification, geometry: DropletNotchGeometry, hasPicture: Bool) -> Layout {
+        let contentWidth = geometry.isHardwareNotch ? geometry.closedWidth + 144 : 208
+        let textWidth = max(120, contentWidth - 28 - 8 - 52 - 8 - (hasPicture ? 48 : 0))
+        let lineHeight = ceil(bodyFont.ascender - bodyFont.descender + bodyFont.leading)
+        let measured = (notification.body as NSString).boundingRect(
+            with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: bodyFont]
+        )
+        let lines = min(maxBodyLines, max(1, Int(ceil(measured.height / lineHeight))))
+        let textHeight = 17 + 2 + CGFloat(lines) * lineHeight
+        let height = max(28, textHeight) + (QuickActions.hasAny(notification) ? 8 + 28 : 0)
+        return Layout(bodyLines: lines, height: ceil(height))
     }
 
     var body: some View {
@@ -43,7 +67,7 @@ struct NotificationCard: View {
                     Text(notification.body)
                         .font(.system(size: 12))
                         .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                        .lineLimit(2)
+                        .lineLimit(bodyLines)
                         .truncationMode(.tail)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
