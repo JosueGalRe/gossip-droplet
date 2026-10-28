@@ -38,8 +38,13 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     @Published private(set) var page: Page = .home
 
     /// One height for every page, so switching pages never resizes the shelf; each page fills it. Home with both a
-    /// live tile and the music is what needs it.
-    static let contentHeight: CGFloat = 236
+    /// live tile and the music is what needs it. A focused notification is the exception: it grows to show all of it.
+    static let pageHeight: CGFloat = 236
+
+    var contentHeight: CGFloat {
+        guard page == .notifications, let focused = focusedNotification else { return Self.pageHeight }
+        return FocusedNotification.height(for: focused, picture: picture(for: focused))
+    }
 
     var homeShowsLive: Bool { !liveNotifications.isEmpty }
     var homeShowsMedia: Bool { currentMedia != nil }
@@ -49,10 +54,13 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     /// Newest first.
     @Published private(set) var notifications: [PhoneNotification] = []
     @Published private(set) var nowPlaying: [String: NowPlaying] = [:]
-    @Published var replyingTo: String?
     @Published var replyText = ""
-    /// The notification row opened to show its picture, buttons and suggested replies.
-    @Published var expandedKey: String?
+    /// The notification shown on its own, in place of the list: all of it, its picture, its buttons, a reply field.
+    @Published private(set) var focusedKey: String?
+
+    var focusedNotification: PhoneNotification? {
+        focusedKey.flatMap { key in notifications.first { $0.key == key } }
+    }
 
     @Published private(set) var threads: [MessageThread] = []
     @Published private(set) var openThreadID: String?
@@ -129,7 +137,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         nowPlaying = [:]
         images = [:]
         artwork = [:]
-        replyingTo = nil
+        focusedKey = nil
         publishActivity()
         publishLockScreen()
     }
@@ -193,8 +201,8 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             let key = "\(removed.deviceId)|\(removed.id)"
             notifications.removeAll { $0.key == key }
             images[key] = nil
-            if replyingTo == key { replyingTo = nil }
-            if expandedKey == key { expandedKey = nil }
+            // Gone from the phone (read or dismissed there): back to the list.
+            if focusedKey == key { unfocus() }
             // Gone from the phone (read or dismissed there): the card goes too, held or not.
             if hudNotification?.key == key { closeHUD() }
             if callHUDKey == key {
@@ -235,6 +243,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     func select(_ page: Page) {
         guard page != self.page else { return }
+        if focusedKey != nil { unfocus() }
         self.page = page
         host?.preferences.setValue(page, forKey: "page")
     }
@@ -245,10 +254,21 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         host?.shelf.open(revealing: Self.widgetID)
     }
 
-    /// From the narrow card: the full widget, on the notification history with this one open.
+    /// The full widget with this notification on its own (from the list, the narrow card, home or the notch).
     func open(_ notification: PhoneNotification) {
-        expandedKey = notification.key
-        reveal(.notifications)
+        replyText = ""
+        select(.notifications)
+        focusedKey = notification.key
+        host?.shelf.invalidateLayout(for: Self.widgetID)
+        host?.shelf.open(revealing: Self.widgetID)
+        if notification.hasReply { host?.shelf.requestKeyboardFocus() }
+    }
+
+    /// Back to the list, at the page's usual height.
+    func unfocus() {
+        focusedKey = nil
+        replyText = ""
+        host?.shelf.invalidateLayout(for: Self.widgetID)
     }
 
     /// From the narrow card: the full widget, in this conversation.
@@ -311,24 +331,16 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     }
 
     func startReply(to notification: PhoneNotification) {
-        replyText = ""
-        replyingTo = notification.key
-        host?.shelf.requestKeyboardFocus()
+        open(notification)
     }
 
+    /// Sends what is in the focused notification's reply field, then goes back to the list.
     func sendReply() {
         let text = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let key = replyingTo, !text.isEmpty,
-              let notification = notifications.first(where: { $0.key == key }) else { return }
+        guard !text.isEmpty, let notification = focusedNotification else { return }
         client?.send(["type": "reply", "deviceId": notification.deviceId, "id": notification.id, "text": text])
-        replyingTo = nil
-        replyText = ""
         host?.feedback.play(.success)
-    }
-
-    func cancelReply() {
-        replyingTo = nil
-        replyText = ""
+        unfocus()
     }
 
     func revealNotifications() {
@@ -364,9 +376,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         if host?.workspace.copyToPasteboard(code) == true { host?.feedback.play(.success) }
     }
 
-    func toggleExpanded(_ notification: PhoneNotification) {
-        expandedKey = expandedKey == notification.key ? nil : notification.key
-    }
+
 
     // MARK: Media
 
@@ -731,6 +741,18 @@ extension GossipDroplet {
         }
         droplet.nowPlaying = ["pixel": NowPlaying(title: "Midnight City", artist: "M83", isPlaying: true, positionMs: 60_000,
                                                   durationMs: 243_000, packageName: "com.spotify.music", artworkBase64: nil)]
+        if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_FOCUS"] != nil, !droplet.notifications.isEmpty {
+            // A portrait picture, like a sticker, on the first notification, shown on its own.
+            let image = NSImage(size: NSSize(width: 300, height: 380), flipped: false) { rect in
+                NSGradient(starting: .systemPink, ending: .systemIndigo)?.draw(in: rect, angle: 60)
+                return true
+            }
+            if let tiff = image.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                droplet.notifications[0].pictureBase64 = png.base64EncodedString()
+            }
+            droplet.page = .notifications
+            droplet.focusedKey = droplet.notifications[0].key
+        }
         if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_QUIET"] != nil {
             // Nothing in progress and nothing playing: home fills with the latest notifications.
             droplet.notifications.removeAll { $0.live != nil }
@@ -761,7 +783,7 @@ extension GossipDroplet: ShelfWidgetProviding {
                 title: "Phone",
                 systemImage: "iphone",
                 layoutTraits: ShelfWidgetLayoutTraits(preferredSoloWidth: 420, preferredPairedWidth: 220,
-                                                      contentHeight: .fixed(Self.contentHeight)),
+                                                      contentHeight: .fixed(contentHeight)),
                 focusPolicy: .keyboardFocusable,
                 searchKeywords: ["gossip", "android", "notifications", "battery", "sms", "messages", "music"]
             ),

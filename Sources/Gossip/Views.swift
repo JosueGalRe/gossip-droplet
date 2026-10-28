@@ -285,9 +285,8 @@ private struct NotificationsPage: View {
     var body: some View {
         if context.isCompact {
             compactBody
-        } else if let key = droplet.replyingTo,
-                  let notification = droplet.notifications.first(where: { $0.key == key }) {
-            ReplyComposer(droplet: droplet, notification: notification)
+        } else if let focused = droplet.focusedNotification {
+            FocusedNotification(droplet: droplet, notification: focused)
         } else if droplet.visibleNotifications.isEmpty {
             Message(text: droplet.showsNotifications ? "No notifications" : "Phone notifications are off")
         } else {
@@ -353,88 +352,69 @@ private struct NotificationList: View {
     }
 }
 
+/// One notification in the history: a click opens it on its own; reply and dismiss show under the pointer.
 private struct NotificationRow: View {
     @ObservedObject var droplet: GossipDroplet
     let notification: PhoneNotification
     let now: Date
     @State private var hovering = false
 
-    private var expanded: Bool { droplet.expandedKey == notification.key }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: DroppySpacing.xs) {
-            HStack(alignment: .top, spacing: DroppySpacing.sm) {
-                Group {
-                    if let avatar = droplet.avatar(for: notification) {
-                        AppIcon(image: avatar, size: 22, round: true)
-                    } else {
-                        Color.clear
-                    }
-                }
-                .frame(width: 22, height: 22)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(notification.headline)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                        .lineLimit(1)
-                    Text(notification.body)
-                        .font(.system(size: 11))
-                        .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                        .lineLimit(expanded ? nil : 1)
-                        .fixedSize(horizontal: false, vertical: expanded)
-                }
-                Spacer(minLength: 0)
-                // The time and the thumbnail at rest; the row's buttons under the pointer or when it is open.
-                if hovering || expanded {
-                    HStack(spacing: DroppySpacing.xs) {
-                        if notification.hasReply {
-                            Button { droplet.startReply(to: notification) } label: { Image(systemName: "arrowshape.turn.up.left") }
-                                .help("Reply")
-                                .accessibilityLabel("Reply to \(notification.headline)")
-                        }
-                        Button { droplet.dismiss(notification) } label: { Image(systemName: "xmark") }
-                            .help("Dismiss on phone")
-                            .accessibilityLabel("Dismiss \(notification.headline)")
-                    }
-                    .buttonStyle(DroppyCircleButtonStyle(size: 20))
+        HStack(alignment: .top, spacing: DroppySpacing.sm) {
+            Group {
+                if let avatar = droplet.avatar(for: notification) {
+                    AppIcon(image: avatar, size: 22, round: true)
                 } else {
-                    if let picture = droplet.picture(for: notification) {
-                        Image(nsImage: picture).resizable().aspectRatio(contentMode: .fill)
-                            .frame(width: 26, height: 26)
-                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    }
-                    Text(RelativeTime.short(notification.date, now: now))
-                        .font(.system(size: 10))
-                        .monospacedDigit()
-                        .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
-                        .frame(minWidth: 24, alignment: .trailing)
+                    Color.clear
                 }
             }
-            .contentShape(Rectangle())
-            .onTapGesture { droplet.toggleExpanded(notification) }
-
-            if expanded {
-                VStack(alignment: .leading, spacing: DroppySpacing.xs) {
-                    if let picture = droplet.picture(for: notification) {
-                        Image(nsImage: picture).resizable().aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 120, alignment: .leading)
-                            .clipShape(RoundedRectangle(cornerRadius: DroppyRadius.small, style: .continuous))
+            .frame(width: 22, height: 22)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(notification.headline)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                Text(notification.body)
+                    .font(.system(size: 11))
+                    .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+            }
+            .lineLimit(1)
+            Spacer(minLength: 0)
+            // The time and the thumbnail at rest; the row's buttons under the pointer.
+            if hovering {
+                HStack(spacing: DroppySpacing.xs) {
+                    if notification.hasReply {
+                        Button { droplet.startReply(to: notification) } label: { Image(systemName: "arrowshape.turn.up.left") }
+                            .help("Reply")
+                            .accessibilityLabel("Reply to \(notification.headline)")
                     }
-                    if QuickActions.hasAny(notification) {
-                        ScrollView(.horizontal, showsIndicators: false) { QuickActions(droplet: droplet, notification: notification) }
-                    }
+                    Button { droplet.dismiss(notification) } label: { Image(systemName: "xmark") }
+                        .help("Dismiss on phone")
+                        .accessibilityLabel("Dismiss \(notification.headline)")
                 }
-                .padding(.leading, 30)
+                .buttonStyle(DroppyCircleButtonStyle(size: 20))
+            } else {
+                if let picture = droplet.picture(for: notification) {
+                    Image(nsImage: picture).resizable().aspectRatio(contentMode: .fill)
+                        .frame(width: 26, height: 26)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                Text(RelativeTime.short(notification.date, now: now))
+                    .font(.system(size: 10))
+                    .monospacedDigit()
+                    .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
+                    .frame(minWidth: 24, alignment: .trailing)
             }
         }
         .padding(.horizontal, DroppySpacing.xs)
         .padding(.vertical, 3)
-        .background(hovering || expanded ? AdaptiveColors.notchSurfaceCardFill : Color.clear,
+        .contentShape(Rectangle())
+        .onTapGesture { droplet.open(notification) }
+        .background(hovering ? AdaptiveColors.notchSurfaceCardFill : Color.clear,
                     in: RoundedRectangle(cornerRadius: DroppyRadius.small, style: .continuous))
         .onHover { hovering = $0 }
         .droppyFlatGlassControls()
         .accessibilityElement(children: .contain)
-        .accessibilityAction(named: expanded ? "Collapse" : "Expand") { droplet.toggleExpanded(notification) }
+        .accessibilityAction(named: "Open") { droplet.open(notification) }
         .accessibilityAction(named: "Dismiss on phone") { droplet.dismiss(notification) }
     }
 }
@@ -510,39 +490,6 @@ struct LiveProgress: View {
         .progressViewStyle(.linear)
         .tint(.green)
         .controlSize(.small)
-    }
-}
-
-private struct ReplyComposer: View {
-    @ObservedObject var droplet: GossipDroplet
-    let notification: PhoneNotification
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DroppySpacing.sm) {
-            HStack(alignment: .top, spacing: DroppySpacing.sm) {
-                AppIcon(image: droplet.icon(for: notification), size: 18)
-                Text("\(notification.headline): \(notification.body)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                    .lineLimit(3)
-            }
-            HStack(spacing: DroppySpacing.sm) {
-                TextField("Reply", text: $droplet.replyText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                    .focused($focused)
-                    .onSubmit { droplet.sendReply() }
-                    .onExitCommand { droplet.cancelReply() }
-                Button("Cancel") { droplet.cancelReply() }
-                    .buttonStyle(DroppyQuietButtonStyle(size: .small))
-                Button("Send") { droplet.sendReply() }
-                    .buttonStyle(DroppyAccentButtonStyle(size: .small))
-                    .disabled(droplet.replyText.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        }
-        .onAppear { focused = true }
     }
 }
 
