@@ -44,15 +44,7 @@ struct HomePage: View {
                                 .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
                             Spacer(minLength: 0)
                             if latest.count > 3 {
-                                Button { droplet.select(.notifications) } label: {
-                                    HStack(spacing: 2) {
-                                        Text("See all \(latest.count)")
-                                        Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
-                                    }
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                                }
-                                .buttonStyle(.plain)
+                                SeeAllButton(count: latest.count) { droplet.select(.notifications) }
                             }
                         }
                         .padding(.horizontal, DroppySpacing.xs)
@@ -346,18 +338,22 @@ struct CompactNotificationRow: View {
     }
 }
 
+/// A quiet text link to a whole list, so it never outweighs the rows above it.
 struct SeeAllButton: View {
     let count: Int
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 3) {
+            HStack(spacing: 2) {
                 Text(count > 0 ? "See all \(count)" : "See all")
-                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
             }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(DroppyQuietButtonStyle(size: .small))
+        .buttonStyle(.plain)
         .fixedSize()
     }
 }

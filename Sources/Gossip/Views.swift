@@ -309,7 +309,8 @@ private struct NotificationsPage: View {
                 }
                 if list.count > 4 {
                     SeeAllButton(count: list.count) { droplet.reveal(.notifications) }
-                        .padding(.top, DroppySpacing.xs)
+                        .padding(.horizontal, DroppySpacing.xs)
+                        .padding(.top, 2)
                 }
             }
         }

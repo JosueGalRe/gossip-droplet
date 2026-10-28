@@ -66,7 +66,8 @@ struct MessagesPage: View {
                 }
                 if droplet.threads.count > 4 {
                     SeeAllButton(count: droplet.threads.count) { droplet.reveal(.messages) }
-                        .padding(.top, DroppySpacing.xs)
+                        .padding(.horizontal, DroppySpacing.xs)
+                        .padding(.top, 2)
                 }
             }
         }
