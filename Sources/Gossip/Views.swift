@@ -213,10 +213,26 @@ struct PhoneWidget: View {
                 .buttonStyle(DroppyCircleButtonStyle(size: 20))
                 .help(droplet.isRingingPhone ? "Stop ringing" : "Ring phone")
                 .accessibilityLabel(droplet.isRingingPhone ? "Stop ringing" : "Ring phone")
-                Button { droplet.openInGossip("mirror") } label: { Image(systemName: "rectangle.on.rectangle") }
+                if let hotspot = droplet.phone?.hotspot {
+                    let on = droplet.hotspotRequested ?? hotspot.enabled
+                    Button { droplet.toggleHotspot() } label: {
+                        Image(systemName: "personalhotspot").foregroundStyle(on ? Color.blue : AdaptiveColors.notchSurfaceSecondaryText)
+                    }
                     .buttonStyle(DroppyCircleButtonStyle(size: 20))
-                    .help("Mirror phone or open its apps")
-                    .accessibilityLabel("Mirror phone")
+                    .opacity(droplet.hotspotRequested == nil ? 1 : 0.5)
+                    .disabled(droplet.hotspotRequested != nil)
+                    .help(on ? "Hotspot on\(hotspot.ssid.map { " (\($0))" } ?? ""): click to turn off" : "Turn on the hotspot and join it")
+                    .accessibilityLabel(on ? "Turn off hotspot" : "Turn on hotspot")
+                }
+                if let dnd = droplet.phone?.dnd {
+                    Button { droplet.setPhoneDND(!dnd) } label: {
+                        Image(systemName: dnd ? "moon.fill" : "moon").foregroundStyle(dnd ? Color.indigo : AdaptiveColors.notchSurfaceSecondaryText)
+                    }
+                    .buttonStyle(DroppyCircleButtonStyle(size: 20))
+                    .help(dnd ? "Do Not Disturb is on: click to turn off" : "Turn on Do Not Disturb")
+                    .accessibilityLabel(dnd ? "Turn off Do Not Disturb" : "Turn on Do Not Disturb")
+                }
+                AppsMenu(droplet: droplet)
             }
             if droplet.isConnected, droplet.phone != nil {
                 PageSwitch(droplet: droplet)
@@ -565,6 +581,13 @@ struct PhoneMenu: View {
                 }
                 Button(droplet.isRingingPhone ? "Stop ringing" : "Ring phone") { droplet.ringPhone() }
                 Button("Mirror phone…") { droplet.openInGossip("mirror") }
+                if let hotspot = phone.hotspot {
+                    Button(hotspot.enabled ? "Turn off hotspot" : "Turn on hotspot") { droplet.toggleHotspot() }
+                        .disabled(droplet.hotspotRequested != nil)
+                }
+                if let dnd = phone.dnd {
+                    Button(dnd ? "Turn off Do Not Disturb" : "Turn on Do Not Disturb") { droplet.setPhoneDND(!dnd) }
+                }
                 Button("Messages") { droplet.reveal(.messages) }
             } else {
                 Text(droplet.isConnected ? "No phone paired" : "Gossip isn't running")
@@ -576,6 +599,50 @@ struct PhoneMenu: View {
         .foregroundStyle(AdaptiveColors.primaryTextAuto)
         .padding(.vertical, DroppySpacing.xs)
         .frame(minWidth: 200, alignment: .leading)
+    }
+}
+
+/// The phone's screen or one of its apps on the Mac: the whole screen, the apps that notified last, then every app.
+private struct AppsMenu: View {
+    @ObservedObject var droplet: GossipDroplet
+
+    var body: some View {
+        Menu {
+            Button("Mirror the screen…") { droplet.openInGossip("mirror") }
+            let recent = droplet.recentApps
+            if !recent.isEmpty {
+                Section("Recent") {
+                    ForEach(recent) { item($0) }
+                }
+            }
+            if let apps = droplet.phoneApps, !apps.isEmpty {
+                Menu("All apps") {
+                    ForEach(apps.sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }) { item($0) }
+                }
+            }
+        } label: {
+            Image(systemName: "rectangle.on.rectangle")
+                .font(.system(size: 9, weight: .semibold))
+                .frame(width: 20, height: 20)
+                .background(AdaptiveColors.notchSurfaceCardFill, in: Circle())
+                .contentShape(Circle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Mirror the phone or open one of its apps on the Mac")
+        .accessibilityLabel("Phone screen and apps")
+    }
+
+    private func item(_ app: PhoneApp) -> some View {
+        Button { droplet.openOnMac(app.package) } label: {
+            if let icon = droplet.menuIcon(app.package) {
+                Label { Text(app.label) } icon: { Image(nsImage: icon) }
+            } else {
+                Text(app.label)
+            }
+        }
     }
 }
 
@@ -620,6 +687,12 @@ struct GossipSettings: View {
                     binding: Binding(get: { droplet.hudDuration },
                                      set: { droplet.setPreference($0.rounded(), forKey: "hudDuration") }),
                     range: 3...15
+                )
+                DropletToggleRow(
+                    title: "Clipboard alert",
+                    subtitle: "Shows what you copied on the phone in the notch when it lands on the Mac.",
+                    isOn: Binding(get: { droplet.alertsClipboard },
+                                  set: { droplet.setPreference($0, forKey: "clipboardAlerts") })
                 )
                 DropletToggleRow(
                     title: "Low battery alert",

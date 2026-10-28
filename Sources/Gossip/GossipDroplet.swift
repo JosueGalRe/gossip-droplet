@@ -28,6 +28,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     static let widgetID: ShelfWidgetID = "gossip"
     static let notificationHUDID = "gossip.notification"
     static let batteryHUDID = "gossip.battery"
+    static let noticeHUDID = "gossip.notice"
 
     /// Home first: the phone at a glance, what is going on and what is playing. Then the notification history and the
     /// SMS conversations.
@@ -109,7 +110,11 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             setHidden("com.pizzahut.sv", true)
             publishActivity()
             publishLockScreen()
-            if let first = notifications.first {
+            if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_HUD"] == "clipboard" {
+                presentNotice(symbol: "doc.on.clipboard", title: "Copied from Pixel 9 Pro XL",
+                              detail: "https://maps.app.goo.gl/x7Yq2 — nos vemos en la entrada de Multiplaza a las 7",
+                              image: nil, duration: nil)
+            } else if let first = notifications.first {
                 announce(first)
                 if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_HUD_OPEN"] != nil { toggleHUDExpanded() }
             }
@@ -139,6 +144,8 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             if messagesViewers > 0 { client?.send(["type": "messages.open"]) }
             return
         }
+        appsRequested = false
+        hotspotRequested = nil
         // Gossip resends everything on the next connect.
         devices = []
         ringing = []
@@ -156,6 +163,13 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         let devices: [GossipDevice]
         let ringing: [String]?
     }
+    private struct ClipboardCopy: Decodable {
+        let deviceId: String
+        let text: String?
+        let image: String?
+    }
+    private struct BridgeError: Decodable { let message: String }
+    private struct HotspotResult: Decodable { let ok: Bool }
     private struct Removed: Decodable {
         let deviceId: String
         let id: String
@@ -186,6 +200,11 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             guard let state = try? decoder.decode(State.self, from: line) else { return }
             devices = state.devices
             ringing = Set(state.ringing ?? [])
+            // The phone's apps once per connection, for "Open on Mac" and the app menu; Gossip has them cached.
+            if !appsRequested, let phone {
+                appsRequested = true
+                client?.send(["type": "apps", "deviceId": phone.id])
+            }
             checkBattery()
             publishLockScreen()
         case "notification.posted":
@@ -251,6 +270,19 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         case "messages.history":
             guard let history = try? decoder.decode(History.self, from: line), history.threadId == openThreadID else { return }
             conversation = history.messages
+        case "clipboard":
+            guard alertsClipboard, let copy = try? decoder.decode(ClipboardCopy.self, from: line) else { return }
+            let name = devices.first { $0.id == copy.deviceId }?.name ?? "phone"
+            let image = copy.image.flatMap { Data(base64Encoded: $0) }.flatMap(NSImage.init(data:))
+            presentNotice(symbol: "doc.on.clipboard", title: "Copied from \(name)", detail: copy.text, image: image)
+        case "error":
+            guard let error = try? decoder.decode(BridgeError.self, from: line) else { return }
+            host?.feedback.play(.failure)
+            presentNotice(symbol: "exclamationmark.triangle", title: "Gossip", detail: error.message, image: nil)
+        case "hotspot.result":
+            guard let result = try? decoder.decode(HotspotResult.self, from: line) else { return }
+            hotspotRequested = nil
+            host?.feedback.play(result.ok ? .success : .failure)
         case "messages.status":
             guard let status = try? decoder.decode(MessagesStatus.self, from: line) else { return }
             messagesLoading = status.loading
@@ -481,22 +513,95 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         host?.preferences.value(forKey: "show", default: true) ?? true
     }
 
+    // MARK: Phone controls
+
+    /// Opens one of the phone's apps in its own Mac window (Gossip, over Shizuku), and gets the shelf out of its way.
+    func openOnMac(_ package: String) {
+        guard let phone else { return }
+        client?.send(["type": "app.open", "deviceId": phone.id, "package": package])
+        host?.shelf.close()
+    }
+
+    /// Whether the app has a launcher icon on the phone, so it can open as a window.
+    func canOpenOnMac(_ package: String) -> Bool {
+        phoneApps?.contains { $0.package == package } ?? false
+    }
+
+    /// The phone's apps that have notified most recently, for the top of the app menu.
+    var recentApps: [PhoneApp] {
+        var seen = Set<String>()
+        return notifications.compactMap { notification in
+            guard seen.insert(notification.appPackage).inserted else { return nil }
+            return phoneApps?.first { $0.package == notification.appPackage }
+        }
+        .prefix(6).map { $0 }
+    }
+
+    /// An app's icon at menu size.
+    func menuIcon(_ package: String) -> NSImage? {
+        if let cached = menuIcons[package] { return cached }
+        guard let icon = appIcons[package] else { return nil }
+        let small = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rect in
+            icon.draw(in: rect)
+            return true
+        }
+        menuIcons[package] = small
+        return small
+    }
+
+    private var menuIcons: [String: NSImage] = [:]
+    private var appsRequested = false
+
+    func setPhoneDND(_ enabled: Bool) {
+        guard let phone else { return }
+        client?.send(["type": "dnd", "deviceId": phone.id, "enabled": enabled])
+    }
+
+    /// The hotspot state asked for and not yet confirmed; the button waits on it.
+    @Published private(set) var hotspotRequested: Bool?
+
+    func toggleHotspot() {
+        guard let phone, let hotspot = phone.hotspot, hotspotRequested == nil else { return }
+        let enable = !hotspot.enabled
+        hotspotRequested = enable
+        client?.send(["type": "hotspot", "deviceId": phone.id, "enabled": enable])
+        // Bluetooth can fail without an answer; the button comes back either way.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(25))
+            if self?.hotspotRequested == enable { self?.hotspotRequested = nil }
+        }
+    }
+
+    /// A short card in the notch: what happened, a line or two of detail, a picture.
+    private func presentNotice(symbol: String, title: String, detail: String?, image: NSImage?, duration: TimeInterval? = 4) {
+        guard let host else { return }
+        host.hud.present(DropletHUDRequest(
+            id: Self.noticeHUDID, duration: duration,
+            accessibilityLabel: [title, detail].compactMap { $0 }.joined(separator: ": "),
+            isExpanded: true, expandedContentHeight: NoticeCard.height(detail: detail, image: image)
+        ) {
+            NoticeStrip(symbol: symbol)
+        } expanded: {
+            NoticeCard(symbol: symbol, title: title, detail: detail, image: image)
+        })
+    }
+
     // MARK: Apps
 
-    /// The phone's apps while the settings are open, `nil` until the phone answers.
+    /// The phone's launchable apps, `nil` until Gossip answers.
     @Published private(set) var phoneApps: [PhoneApp]?
     @Published private(set) var phoneAppsError: String?
     private(set) var appIcons: [String: NSImage] = [:]
     @Published var appQuery = ""
     private var appsViewers = 0
 
-    /// The settings and the apps page ask for the phone's apps while they show.
+    /// The settings and the apps page ask the phone for a fresh list when they open; Gossip keeps sending changes
+    /// (new icons, apps installed or removed) for the rest of the connection.
     func appsVisible(_ visible: Bool) {
         appsViewers = max(0, appsViewers + (visible ? 1 : -1))
         if visible, appsViewers == 1, let phone {
             client?.send(["type": "apps", "deviceId": phone.id])
         } else if !visible, appsViewers == 0 {
-            client?.send(["type": "apps.close"])
             appQuery = ""
         }
     }
@@ -548,6 +653,11 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     var hudDuration: Double {
         host?.preferences.value(forKey: "hudDuration", default: 6.0) ?? 6
+    }
+
+    /// A HUD each time the phone's clipboard lands on the Mac.
+    var alertsClipboard: Bool {
+        host?.preferences.value(forKey: "clipboardAlerts", default: true) ?? true
     }
 
     var alertsLowBattery: Bool {
@@ -777,7 +887,8 @@ extension GossipDroplet {
                 + "trae comida, yo puedo pasar por pupusas de camino si me dicen cuántas."
             : "🔗 Bill Fanter on Instagram (www.instagram.com/reel/DQx4abcdEfGhIjk/?igsh=MTRmZ2x0)"
         droplet.devices = [GossipDevice(id: "pixel", name: "Pixel 9 Pro XL", type: "androidPhone", online: true,
-                                        battery: .init(level: 64, charging: false))]
+                                        battery: .init(level: 64, charging: false), dnd: true,
+                                        hotspot: .init(enabled: false, ssid: nil))]
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         droplet.notifications = [
             PhoneNotification(deviceId: "pixel", id: "1", appPackage: "com.whatsapp", appName: "WhatsApp", title: "Ana",

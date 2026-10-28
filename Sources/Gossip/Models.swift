@@ -14,6 +14,15 @@ struct GossipDevice: Decodable, Equatable, Identifiable {
     let battery: Battery?
     /// Online through the internet relay rather than the local network.
     var relayed: Bool? = nil
+    /// The phone's Do Not Disturb, when it reports it.
+    var dnd: Bool? = nil
+    /// The phone's Instant Hotspot, when this Mac can see it (over the mesh or Bluetooth).
+    var hotspot: Hotspot? = nil
+
+    struct Hotspot: Decodable, Equatable {
+        let enabled: Bool
+        let ssid: String?
+    }
 
     var isPhone: Bool { type != "mac" }
 }

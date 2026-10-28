@@ -276,3 +276,68 @@ struct ActivityTrailing: View {
         .font(.system(size: DroppyLiveActivityMetrics.iconSize, weight: .medium))
     }
 }
+
+// MARK: - Notices
+
+/// A notice's strip: its symbol beside the notch.
+struct NoticeStrip: View {
+    let symbol: String
+
+    var body: some View {
+        HStack {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// Something worth a glance, not an action: what was copied on the phone, why an app window did not open.
+struct NoticeCard: View {
+    let symbol: String
+    let title: String
+    let detail: String?
+    let image: NSImage?
+
+    static let maxImageHeight: CGFloat = 96
+
+    /// Insets, the title, and two lines of detail or the picture.
+    static func height(detail: String?, image: NSImage?) -> CGFloat {
+        var height: CGFloat = 16 + 16
+        if let image, image.size.width > 0 { height += 6 + imageHeight(image) } else if detail?.isEmpty == false { height += 2 + 30 }
+        return height
+    }
+
+    private static func imageHeight(_ image: NSImage) -> CGFloat {
+        min(maxImageHeight, image.size.height)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: DroppySpacing.sm) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: image == nil ? 2 : 6) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
+                    .lineLimit(1)
+                if let image {
+                    Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
+                        .frame(maxHeight: Self.imageHeight(image), alignment: .leading)
+                        .clipShape(RoundedRectangle(cornerRadius: DroppyRadius.small, style: .continuous))
+                } else if let detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(DroppySpacing.sm)
+        .accessibilityElement(children: .combine)
+    }
+}

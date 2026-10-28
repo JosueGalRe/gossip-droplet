@@ -56,6 +56,12 @@ struct FocusedNotification: View {
                     .monospacedDigit()
                     .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
                 Spacer(minLength: 0)
+                if droplet.canOpenOnMac(notification.appPackage) {
+                    Button { droplet.openOnMac(notification.appPackage) } label: { Image(systemName: "macwindow") }
+                        .buttonStyle(DroppyCircleButtonStyle(size: 20))
+                        .help("Open \(notification.appName) on the Mac")
+                        .accessibilityLabel("Open \(notification.appName) on the Mac")
+                }
                 Button { droplet.dismiss(notification) } label: { Image(systemName: "xmark") }
                     .buttonStyle(DroppyCircleButtonStyle(size: 20))
                     .help("Dismiss on phone")
