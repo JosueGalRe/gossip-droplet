@@ -163,8 +163,6 @@ struct PhoneWidget: View {
     @ObservedObject var droplet: GossipDroplet
     let context: ShelfWidgetContext
 
-    @State private var dropTargeted = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: DroppySpacing.sm) {
             header
@@ -182,23 +180,6 @@ struct PhoneWidget: View {
         }
         .padding(context.contentInsets)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // Files dropped on the widget go to the phone.
-        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { droplet.receiveDrop($0) }
-        .overlay {
-            if dropTargeted, let phone = droplet.phone {
-                VStack(spacing: DroppySpacing.xs) {
-                    Image(systemName: "arrow.up.doc").font(.system(size: 22, weight: .medium))
-                    Text("Send to \(phone.name)").font(.system(size: 12, weight: .semibold))
-                }
-                .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: DroppyRadius.medium, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: DroppyRadius.medium, style: .continuous)
-                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 4])))
-                .padding(context.contentInsets)
-                .allowsHitTesting(false)
-            }
-        }
     }
 
     private var header: some View {
@@ -600,7 +581,6 @@ struct PhoneMenu: View {
                 }
                 Button(droplet.isRingingPhone ? "Stop ringing" : "Ring phone") { droplet.ringPhone() }
                 Button("Mirror phone…") { droplet.openInGossip("mirror") }
-                Button("Send files…") { droplet.pickFilesToSend() }
                 if let hotspot = phone.hotspot {
                     Button(hotspot.enabled ? "Turn off hotspot" : "Turn on hotspot") { droplet.toggleHotspot() }
                         .disabled(droplet.hotspotRequested != nil)
@@ -629,7 +609,6 @@ private struct AppsMenu: View {
     var body: some View {
         Menu {
             Button("Mirror the screen…") { droplet.openInGossip("mirror") }
-            Button("Send files…") { droplet.pickFilesToSend() }
             let recent = droplet.recentApps
             if !recent.isEmpty {
                 Section("Recent") {

@@ -29,7 +29,6 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     static let notificationHUDID = "gossip.notification"
     static let batteryHUDID = "gossip.battery"
     static let noticeHUDID = "gossip.notice"
-    static let receivedHUDID = "gossip.received"
 
     /// Home first: the phone at a glance, what is going on and what is playing. Then the notification history and the
     /// SMS conversations.
@@ -126,10 +125,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             setHidden("com.pizzahut.sv", true)
             publishActivity()
             publishLockScreen()
-            if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_HUD"] == "received" {
-                presentReceived(URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app/Contents/Resources/Finder.icns"),
-                                from: "Pixel 9 Pro XL")
-            } else if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_HUD"] == "clipboard" {
+            if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_HUD"] == "clipboard" {
                 presentNotice(symbol: "doc.on.clipboard", title: "Copied from Pixel 9 Pro XL",
                               detail: "https://maps.app.goo.gl/x7Yq2 — nos vemos en la entrada de Multiplaza a las 7",
                               image: nil, duration: nil)
@@ -189,11 +185,6 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     }
     private struct BridgeError: Decodable { let message: String }
     private struct HotspotResult: Decodable { let ok: Bool }
-    private struct Transfers: Decodable { let transfers: [FileTransfer] }
-    private struct Received: Decodable {
-        let deviceId: String
-        let path: String
-    }
     private struct Removed: Decodable {
         let deviceId: String
         let id: String
@@ -303,24 +294,6 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             guard let error = try? decoder.decode(BridgeError.self, from: line) else { return }
             host?.feedback.play(.failure)
             presentNotice(symbol: "exclamationmark.triangle", title: "Gossip", detail: error.message, image: nil)
-        case "file.progress":
-            guard let list = try? decoder.decode(Transfers.self, from: line) else { return }
-            let before = Dictionary(uniqueKeysWithValues: transfers.map { ($0.id, $0) })
-            transfers = list.transfers
-            // A send that just ended says so; what arrives gets its own card (`file.received`).
-            if let ended = list.transfers.last(where: { $0.outgoing && before[$0.id]?.isActive == true && !$0.isActive }),
-               ended.state != "cancelled" {
-                let name = devices.first { $0.id == ended.deviceId }?.name ?? "phone"
-                let ok = ended.state == "done"
-                host?.feedback.play(ok ? .success : .failure)
-                presentNotice(symbol: ok ? "checkmark.circle" : "exclamationmark.triangle",
-                              title: ok ? "Sent to \(name)" : "Couldn't send to \(name)", detail: ended.name, image: nil)
-            }
-            publishActivity()
-        case "file.received":
-            guard let received = try? decoder.decode(Received.self, from: line) else { return }
-            let name = devices.first { $0.id == received.deviceId }?.name ?? "phone"
-            presentReceived(URL(fileURLWithPath: received.path), from: name)
         case "hotspot.result":
             guard let result = try? decoder.decode(HotspotResult.self, from: line) else { return }
             hotspotRequested = nil
@@ -614,74 +587,6 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
         }
     }
 
-    // MARK: Files
-
-    /// Transfers this session, as Gossip last reported them.
-    @Published private(set) var transfers: [FileTransfer] = []
-
-    var activeTransfer: FileTransfer? { transfers.first { $0.isActive && $0.state == "active" } ?? transfers.first(where: \.isActive) }
-
-    /// Sends files to the phone over Gossip (same network only; Gossip says so otherwise).
-    func sendFiles(_ urls: [URL]) {
-        guard let phone, !urls.isEmpty else { return }
-        client?.send(["type": "files.send", "deviceId": phone.id, "paths": urls.map(\.path)])
-    }
-
-    /// Picks files to send in an open panel, out from under the notch.
-    func pickFilesToSend() {
-        host?.shelf.close()
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.prompt = "Send"
-        panel.message = "Send to \(phone?.name ?? "your phone")"
-        NSApp.activate(ignoringOtherApps: true)
-        panel.begin { [weak self] response in
-            guard response == .OK else { return }
-            self?.sendFiles(panel.urls)
-        }
-    }
-
-    func cancelTransfer(_ id: String) {
-        client?.send(["type": "file.cancel", "id": id])
-    }
-
-    /// Files dropped on the widget: their URLs, then off to the phone.
-    func receiveDrop(_ providers: [NSItemProvider]) -> Bool {
-        let fileProviders = providers.filter { $0.canLoadObject(ofClass: URL.self) }
-        guard phone != nil, !fileProviders.isEmpty else { return false }
-        Task { @MainActor in
-            var urls: [URL] = []
-            for provider in fileProviders {
-                if let url = await withCheckedContinuation({ (done: CheckedContinuation<URL?, Never>) in
-                    _ = provider.loadObject(ofClass: URL.self) { url, _ in done.resume(returning: url) }
-                }), url.isFileURL {
-                    urls.append(url)
-                }
-            }
-            sendFiles(urls)
-        }
-        return true
-    }
-
-    /// A file from the phone landed in Downloads: a card to open it, show it in Finder or drag it out.
-    private func presentReceived(_ url: URL, from name: String) {
-        guard let host else { return }
-        host.feedback.play(.success)
-        host.hud.present(DropletHUDRequest(
-            id: Self.receivedHUDID, duration: 8,
-            accessibilityLabel: "Received \(url.lastPathComponent) from \(name)",
-            isExpanded: true, expandedContentHeight: ReceivedFileCard.height
-        ) {
-            NoticeStrip(symbol: "arrow.down.doc")
-        } expanded: { [weak self] in
-            if let self { ReceivedFileCard(droplet: self, url: url, from: name) }
-        })
-    }
-
-    func open(_ url: URL) { _ = host?.workspace.open(url) }
-    func revealInFinder(_ url: URL) { host?.workspace.revealInFinder(url) }
-
     /// A short card in the notch: what happened, a line or two of detail, a picture.
     private func presentNotice(symbol: String, title: String, detail: String?, image: NSImage?, duration: TimeInterval? = 4) {
         guard let host else { return }
@@ -935,16 +840,13 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     // MARK: Live activity and lock screen
 
-    /// What the compact activity shows: a call, a file on its way, another live notification, else the playing media.
+    /// What the compact activity shows: a call or another live notification first, else the playing media.
     enum ActivitySubject {
         case live(PhoneNotification)
-        case transfer(FileTransfer)
         case media(deviceID: String, playing: NowPlaying)
     }
 
     var activityFocus: ActivitySubject? {
-        if let call = liveNotifications.first(where: { $0.live?.isCall == true }) { return .live(call) }
-        if let transfer = activeTransfer { return .transfer(transfer) }
         if let live = liveNotifications.first { return .live(live) }
         if let media = currentMedia, media.playing.isPlaying { return .media(deviceID: media.deviceID, playing: media.playing) }
         return nil
@@ -956,11 +858,6 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
             activitySubject.send(LiveActivityState(
                 priority: notification.live?.isCall == true ? 300 : 200,
                 accessibilityTitle: "\(notification.appName): \(notification.headline)"
-            ))
-        case .transfer(let transfer):
-            activitySubject.send(LiveActivityState(
-                priority: 250,
-                accessibilityTitle: "\(transfer.outgoing ? "Sending" : "Receiving") \(transfer.name)"
             ))
         case .media(_, let playing):
             activitySubject.send(LiveActivityState(
@@ -1060,10 +957,6 @@ extension GossipDroplet {
                 return true
             }
         }
-        if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_TRANSFER"] != nil {
-            droplet.transfers = [FileTransfer(id: "t", deviceId: "pixel", name: "Vacaciones 2026.mov", size: 100, done: 42,
-                                              outgoing: true, state: "active")]
-        }
         if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_QUIET"] != nil {
             // Nothing in progress and nothing playing: home fills with the latest notifications.
             droplet.notifications.removeAll { $0.live != nil }
@@ -1134,7 +1027,6 @@ extension GossipDroplet: LiveActivityProviding {
     private var activityTitle: String {
         switch activityFocus {
         case .live(let notification): notification.headline
-        case .transfer(let transfer): transfer.name
         case .media(_, let playing): playing.title
         case nil: ""
         }
