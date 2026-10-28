@@ -177,8 +177,7 @@ struct PhoneWidget: View {
             }
             // The page gets exactly what is under the header: a page a few points too tall loses its bottom edge
             // instead of pushing the header up.
-            .frame(height: max(0, droplet.contentHeight - context.contentInsets.top - context.contentInsets.bottom - 32),
-                   alignment: .top)
+            .frame(height: droplet.pageBodyHeight(context), alignment: .top)
             .clipped()
         }
         .padding(context.contentInsets)
@@ -333,20 +332,21 @@ private struct NotificationsPage: View {
         }
     }
 
-    /// Narrow: the newest three, each a button to the full widget with that one open, and the way to the rest.
+    /// Narrow: the newest that fit, each a button to the full widget with that one open, and the way to the rest.
     @ViewBuilder private var compactBody: some View {
         let list = droplet.visibleNotifications
+        let fit = GossipDroplet.listRows(list.count, fitting: droplet.pageBodyHeight(context))
         if list.isEmpty {
             Message(text: "No notifications")
         } else {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(list.prefix(3), id: \.key) { notification in
+                ForEach(list.prefix(fit.rows), id: \.key) { notification in
                     Button { droplet.open(notification) } label: {
                         CompactNotificationRow(droplet: droplet, notification: notification)
                     }
                     .buttonStyle(.plain)
                 }
-                if list.count > 3 {
+                if fit.seeAll {
                     SeeAllButton(count: list.count) { droplet.reveal(.notifications) }
                         .padding(.horizontal, DroppySpacing.xs)
                         .padding(.top, 2)

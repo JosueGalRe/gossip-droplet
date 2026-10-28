@@ -36,13 +36,14 @@ struct MessagesPage: View {
         .onDisappear { droplet.messagesVisible(false) }
     }
 
-    /// Narrow: the three newest conversations, each a button to the full widget in that conversation.
+    /// Narrow: the newest conversations that fit, each a button to the full widget in that conversation.
     @ViewBuilder private var compactBody: some View {
+        let fit = GossipDroplet.listRows(droplet.threads.count, fitting: droplet.pageBodyHeight(context))
         if droplet.threads.isEmpty {
             Message(text: droplet.messagesLoading ? "Loading conversations…" : "No conversations")
         } else {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(droplet.threads.prefix(3)) { thread in
+                ForEach(droplet.threads.prefix(fit.rows)) { thread in
                     Button { droplet.open(thread) } label: {
                         HStack(spacing: DroppySpacing.sm) {
                             VStack(alignment: .leading, spacing: 0) {
@@ -64,7 +65,7 @@ struct MessagesPage: View {
                     }
                     .buttonStyle(.plain)
                 }
-                if droplet.threads.count > 3 {
+                if fit.seeAll {
                     SeeAllButton(count: droplet.threads.count) { droplet.reveal(.messages) }
                         .padding(.horizontal, DroppySpacing.xs)
                         .padding(.top, 2)

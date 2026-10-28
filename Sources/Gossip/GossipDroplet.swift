@@ -43,8 +43,23 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     /// never resizes the shelf and the phone never stretches its neighbours. A focused notification and an open
     /// conversation are the exceptions: they grow to show what they hold.
     static let pageHeight: CGFloat = 176
-    /// What a page has under the header: the height less the insets (16), the header (24) and the gap under it (8).
-    static let pageBodyHeight: CGFloat = pageHeight - 48
+    /// What a page has under the header in this mount: the card the host settled on, less the insets, the header (24)
+    /// and the gap under it (8). The host can give a row less than the declared height, so the declared one is only the
+    /// fallback, and the one a focused notification or an open conversation asks for wins while it grows.
+    func pageBodyHeight(_ context: ShelfWidgetContext) -> CGFloat {
+        let settled = context.availableSize.height
+        let card = settled > 0 && contentHeight == Self.pageHeight ? settled : contentHeight
+        return max(0, card - context.contentInsets.top - context.contentInsets.bottom - 32)
+    }
+
+    /// The list rows (33 tall, 2 apart) that fit in `height`.
+    nonisolated static func rows(fitting height: CGFloat) -> Int { max(0, Int((height + 2) / 35)) }
+
+    /// A narrow list's rows in `height`: all of them when they fit, else as many as leave room for See all (18).
+    nonisolated static func listRows(_ count: Int, fitting height: CGFloat) -> (rows: Int, seeAll: Bool) {
+        if count <= rows(fitting: height) { return (count, false) }
+        return (max(1, rows(fitting: height - 18)), true)
+    }
     static let conversationHeight: CGFloat = 280
 
     var contentHeight: CGFloat {

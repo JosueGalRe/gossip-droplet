@@ -63,3 +63,17 @@ struct RelativeTimeTests {
         #expect(RelativeTime.short(now.addingTimeInterval(60), now: now) == "now")
     }
 }
+
+struct ListRowsTests {
+    @Test func showsEveryRowWhenTheyFit() {
+        #expect(GossipDroplet.listRows(3, fitting: 128) == (3, false))
+    }
+
+    @Test func leavesRoomForSeeAllWhenTheyDoNot() {
+        // 128pt (the declared card) holds three rows and See all; 100pt only two and See all.
+        #expect(GossipDroplet.listRows(10, fitting: 128) == (3, true))
+        #expect(GossipDroplet.listRows(10, fitting: 100) == (2, true))
+        // A shorter card the host settled on still shows one row and the way to the rest.
+        #expect(GossipDroplet.listRows(10, fitting: 40) == (1, true))
+    }
+}
