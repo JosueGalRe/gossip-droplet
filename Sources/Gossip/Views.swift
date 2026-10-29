@@ -166,17 +166,21 @@ struct PhoneWidget: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DroppySpacing.sm) {
             header
-            ConnectionGate(droplet: droplet) {
-                switch droplet.page {
-                case .home: HomePage(droplet: droplet, context: context)
-                case .notifications: NotificationsPage(droplet: droplet, context: context)
-                case .messages: MessagesPage(droplet: droplet, context: context)
+            // The page gets what is really left under the header, measured: Droppy can pad the card itself while
+            // reporting no insets (and a height of 0), so the room can't be worked out from the context. A page a few
+            // points too tall loses its bottom edge instead of pushing the header up.
+            GeometryReader { proxy in
+                ConnectionGate(droplet: droplet) {
+                    switch droplet.page {
+                    case .home: HomePage(droplet: droplet, context: context)
+                    case .notifications: NotificationsPage(droplet: droplet, context: context)
+                    case .messages: MessagesPage(droplet: droplet, context: context)
+                    }
                 }
+                .environment(\.pageBodyHeight, proxy.size.height)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+                .clipped()
             }
-            // The page gets exactly what is under the header: a page a few points too tall loses its bottom edge
-            // instead of pushing the header up.
-            .frame(height: droplet.pageBodyHeight(context), alignment: .top)
-            .clipped()
         }
         .padding(context.contentInsets)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -300,6 +304,7 @@ private struct PageSwitch: View {
 private struct NotificationsPage: View {
     @ObservedObject var droplet: GossipDroplet
     let context: ShelfWidgetContext
+    @Environment(\.pageBodyHeight) private var pageBodyHeight
 
     var body: some View {
         if context.isCompact {
@@ -316,7 +321,7 @@ private struct NotificationsPage: View {
     /// Narrow: the newest that fit, each a button to the full widget with that one open, and the way to the rest.
     @ViewBuilder private var compactBody: some View {
         let list = droplet.visibleNotifications
-        let fit = GossipDroplet.listRows(list.count, fitting: droplet.pageBodyHeight(context))
+        let fit = GossipDroplet.listRows(list.count, fitting: pageBodyHeight)
         if list.isEmpty {
             Message(text: "No notifications")
         } else {

@@ -6,6 +6,7 @@ import SwiftUI
 struct HomePage: View {
     @ObservedObject var droplet: GossipDroplet
     let context: ShelfWidgetContext
+    @Environment(\.pageBodyHeight) private var pageBodyHeight
 
     var body: some View {
         Group {
@@ -23,7 +24,7 @@ struct HomePage: View {
         let live = droplet.homeShowsLive, media = droplet.homeShowsMedia
         // The page's body less the live (40) and media (60) tiles with their gaps; a row is 33 and a 2 gap. Neither
         // tile: three rows; one: two rows or one; both: none.
-        let room = droplet.pageBodyHeight(context) - (live ? 48 : 0) - (media ? 68 : 0)
+        let room = pageBodyHeight - (live ? 48 : 0) - (media ? 68 : 0)
         let rows = GossipDroplet.rows(fitting: room)
         return HStack(alignment: .top, spacing: DroppySpacing.sm) {
             StatusTile(droplet: droplet, notifications: latest.count)
@@ -57,7 +58,7 @@ struct HomePage: View {
         let latest = droplet.visibleNotifications.filter { $0.live == nil }
         let live = droplet.homeShowsLive, media = droplet.homeShowsMedia
         // The counts line (16), the live line (18) and the player (28), each with a 4 gap; rows as on the wide page.
-        let room = droplet.pageBodyHeight(context) - 16 - (live ? 22 : 0) - (media ? 32 : 0) - 4
+        let room = pageBodyHeight - 16 - (live ? 22 : 0) - (media ? 32 : 0) - 4
         let rows = GossipDroplet.rows(fitting: room)
         return VStack(alignment: .leading, spacing: DroppySpacing.xs) {
             Button { droplet.reveal(.notifications) } label: {

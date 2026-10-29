@@ -41,16 +41,7 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
     /// One height for every page, the height of the shelf's other tall widgets (OpenChamber's), so switching pages
     /// never resizes the shelf and the phone never stretches its neighbours. A focused notification and an open
     /// conversation are the exceptions: they grow to show what they hold.
-    static let pageHeight: CGFloat = 176
-    /// What a page has under the header in this mount: the card the host settled on, less the insets, the header (24)
-    /// and the gap under it (8). The host can give a row less than the declared height, so the declared one is only the
-    /// fallback, and the one a focused notification or an open conversation asks for wins while it grows.
-    func pageBodyHeight(_ context: ShelfWidgetContext) -> CGFloat {
-        let settled = context.availableSize.height
-        let card = settled > 0 && contentHeight == Self.pageHeight ? settled : contentHeight
-        return max(0, card - context.contentInsets.top - context.contentInsets.bottom - 32)
-    }
-
+    nonisolated static let pageHeight: CGFloat = 176
     /// The list rows (33 tall, 2 apart) that fit in `height`.
     nonisolated static func rows(fitting height: CGFloat) -> Int { max(0, Int((height + 2) / 35)) }
 
@@ -1081,5 +1072,17 @@ extension GossipDroplet: SettingsPagesProviding {
 
     public var settingsSearchEntries: [SettingsSearchEntry] {
         [SettingsSearchEntry(title: "Phone notifications", keywords: ["gossip", "android", "mute", "hud"])]
+    }
+}
+
+/// What a page has under the widget's header, as measured in [PhoneWidget]: the room the lists and home fill.
+private struct PageBodyHeightKey: EnvironmentKey {
+    static let defaultValue: CGFloat = GossipDroplet.pageHeight - 48
+}
+
+extension EnvironmentValues {
+    var pageBodyHeight: CGFloat {
+        get { self[PageBodyHeightKey.self] }
+        set { self[PageBodyHeightKey.self] = newValue }
     }
 }

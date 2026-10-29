@@ -6,6 +6,7 @@ import SwiftUI
 struct MessagesPage: View {
     @ObservedObject var droplet: GossipDroplet
     let context: ShelfWidgetContext
+    @Environment(\.pageBodyHeight) private var pageBodyHeight
 
     var body: some View {
         Group {
@@ -38,7 +39,7 @@ struct MessagesPage: View {
 
     /// Narrow: the newest conversations that fit, each a button to the full widget in that conversation.
     @ViewBuilder private var compactBody: some View {
-        let fit = GossipDroplet.listRows(droplet.threads.count, fitting: droplet.pageBodyHeight(context))
+        let fit = GossipDroplet.listRows(droplet.threads.count, fitting: pageBodyHeight)
         if droplet.threads.isEmpty {
             Message(text: droplet.messagesLoading ? "Loading conversations…" : "No conversations")
         } else {
