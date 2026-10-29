@@ -444,7 +444,9 @@ public final class GossipDroplet: NSObject, ObservableObject, Droplet {
 
     /// The phone's session, playing ones first.
     var currentMedia: (deviceID: String, playing: NowPlaying)? {
-        let sessions = nowPlaying.sorted { $0.key < $1.key }
+        // An app that keeps its media session open after it stops has no song to show: no tile, no player, no activity.
+        let sessions = nowPlaying.filter { !$0.value.title.trimmingCharacters(in: .whitespaces).isEmpty }
+            .sorted { $0.key < $1.key }
         let pick = sessions.first { $0.value.isPlaying } ?? sessions.first
         return pick.map { ($0.key, $0.value) }
     }
@@ -924,6 +926,11 @@ extension GossipDroplet {
         }
         droplet.nowPlaying = ["pixel": NowPlaying(title: "Midnight City", artist: "M83", isPlaying: true, positionMs: 60_000,
                                                   durationMs: 243_000, packageName: "com.spotify.music", artworkBase64: nil)]
+        if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_NOSONG"] != nil {
+            // A media session left open with no song: home shows no player.
+            droplet.nowPlaying = ["pixel": NowPlaying(title: "", artist: "", isPlaying: false, positionMs: 0,
+                                                      durationMs: 0, packageName: "com.spotify.music", artworkBase64: nil)]
+        }
         if ProcessInfo.processInfo.environment["GOSSIP_SAMPLE_FOCUS"] != nil, !droplet.notifications.isEmpty {
             // A portrait picture, like a sticker, on the first notification, shown on its own.
             let image = NSImage(size: NSSize(width: 300, height: 380), flipped: false) { rect in
