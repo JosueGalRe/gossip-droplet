@@ -1,35 +1,77 @@
-# Gossip
+# Gossip for Droppy
 
-A Droplet for [Droppy](https://getdroppy.app), built with
-[DroppyKit](https://getdroppy.app/docs/droppykit).
+Your Android phone in the notch. A [Droppy](https://getdroppy.app) droplet for
+[**the Gossip fork**](https://github.com/JosueGalRe/gossip): it shows what
+Gossip mirrors from your phone and lets you act on it without leaving what
+you're doing.
+
+<p align="center">
+<img src="shots/shelf-widget.png" width="420" alt="The Phone shelf widget: the phone's battery and its latest notifications, with reply and dismiss buttons">
+<img src="shots/hud.png" width="420" alt="A new notification announced on the notch, as a strip and as a card with Dismiss and Reply">
+</p>
+
+## What it does
+
+- **Shelf widgets** for the phone (battery and the latest notifications), its
+  media and its SMS conversations.
+- **New notifications on the notch**, which you can reply to or dismiss right
+  there. Each phone app can be switched to announce or stay quiet.
+- **Media controls** for whatever the phone is playing.
+- **Ring the phone**, and open Gossip's mirroring and pairing.
+- The phone's battery on the **lock screen**, and a **Phone menu** in the
+  menu bar.
+- **Shortcuts:** "Ring my phone" and "Show phone messages" take a global
+  shortcut in Droppy, and `droppy://droplet/gossip/ring`, `/mirror`,
+  `/messages` and `/pair` work from Shortcuts, Raycast or a hotkey app.
+
+## Requirements
+
+- [Droppy](https://getdroppy.app) 15.3 or later.
+- [The Gossip fork](https://github.com/JosueGalRe/gossip#getting-the-fork)
+  running on the same Mac and paired with your Android phone. Upstream
+  Gossip doesn't have the bridge this droplet talks to.
+
+## Install
+
+1. Download `Gossip.droplet.zip` from the
+   [latest release](https://github.com/JosueGalRe/gossip-droplet/releases/latest)
+   and unzip it.
+2. In Droppy, open **Store → Local droplets** and drop `Gossip.droplet` there.
+3. Droppy didn't sign this droplet, so it asks before running it, once per
+   launch. **Don't ask again for local droplets** turns that off for every
+   local droplet.
+
+Droppy checks this repository's releases for updates when the droplet's
+Settings page opens, or with **Check for updates** in its options menu.
 
 ## Developing
 
+You need the [DroppyKit](https://getdroppy.app/docs/droppykit) CLI.
+
 ```bash
 droppykit run        # open it in Droppy's Settings panel
-droppykit build      # produce Gossip.droplet
-droppykit validate   # the checks the Store repository runs
-droppykit submit     # open the merge request that puts it in the Store
+droppykit build      # produce .build/Gossip.droplet
+droppykit validate   # the checks the Store runs
+swift test
 ```
 
-## With a coding agent
+`AGENTS.md` is the brief for coding agents, and `.mcp.json` /
+`.cursor/mcp.json` connect the DroppyKit MCP server. Run `droppykit agent` to
+point them at your DroppyKit checkout.
 
-Open this folder in Claude Code, Codex or Cursor. `AGENTS.md` is the brief
-they read first, and `.mcp.json` / `.cursor/mcp.json` connect the DroppyKit
-MCP server, which gives them the build, the checks, pictures of every surface
-and an install into Droppy Playground as tools. Codex registers the server
-once per Mac: `codex mcp add droppykit -- path/to/droppykit/Scripts/droppykit mcp`.
-Run `droppykit agent` again after moving this folder or the SDK checkout.
+## Releasing
 
-## Before submitting
+1. Bump `version` in `droplet.json` and add the entry to `CHANGELOG.md`.
+2. Build from a clean checkout, so nothing uncommitted ends up in the bundle,
+   and publish a release whose tag matches the version:
 
-- Leave `Gossip.icon` as it is. It is a placeholder for the harness:
-  Jordy designs every Store droplet's icon, and `droppykit submit` leaves it
-  out. Have an idea for yours? Put it in the merge request's Icon concept
-  section.
-- Replace `Assets/Creator.png` with your own square, unrounded mark.
-- Fill in `summary`, `description` and `creator` in `droplet.json`, and
-  write `CHANGELOG.md`.
-- `droppykit submit`: the Store is a repository, one folder per droplet, and
-  this opens the merge request that adds yours. See
-  [Submitting](https://getdroppy.app/docs/droppykit/submitting).
+```bash
+droppykit build
+ditto -c -k --keepParent .build/Gossip.droplet Gossip.droplet.zip
+shasum -a 256 Gossip.droplet.zip > Gossip.droplet.zip.sha256
+gh release create v1.1.0 Gossip.droplet.zip Gossip.droplet.zip.sha256 --title 1.1.0
+```
+
+## License
+
+[Apache 2.0](LICENSE)
