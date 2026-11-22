@@ -31,12 +31,12 @@
   "creator": {
     "name": "Bryan Galdámez",
     "kind": "community",
-    "url": "https://github.com/vmd1/gossip",
+    "url": "https://github.com/JosueGalRe/gossip",
     "avatar": "Creator.png",
     "gitlab": "josuegalre"
   },
   "source": {
-    "repository": "https://gitlab.com/droppyformac1/droplets/-/tree/main/droplets/gossip",
+    "repository": "https://github.com/JosueGalRe/gossip-droplet",
     "license": "Apache-2.0"
   },
   "screenshots": [],
